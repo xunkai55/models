@@ -165,19 +165,15 @@ class TransformerMain(object):
   def train_one_step(self, flags_obj, version):
     params, is_train = self.params, True
     assert(version == "keras")
-    model_dict = transformer.create_model(params, is_train)
-    model = model_dict["model"]
-    targets, logits = model_dict["targets"], model_dict["logits"]
-    get_pred_fn = lambda y_label, y_pred: y_pred
+    model = transformer.TransformerV2(params, train=True)
     opt = self._create_optimizer_v2()
-    model.compile(
-        opt, loss={"transformer_loss": get_pred_fn}, target_tensors=[])
+    loss = lambda y_true, y_pred: metrics.transformer_loss(
+        y_pred, y_true, params["label_smoothing"], params["vocab_size"])
+    model.compile(opt, loss={"transformer_loss": loss})
         # Add this parameter to enable Mirrored DS on subclassed models
     self._load_weights_if_possible(model, flags_obj.init_weight_path)
     model.summary()
-    map_data_fn = lambda x, y: ((x, y), tf.constant(0.0))
-    ds = dataset.train_input_fn(params)
-    ds = ds.map(map_data_fn, num_parallel_calls=params["num_parallel_calls"])
+    ds = dataset.get_train_dataset(params)
     x, y = tf.data.experimental.get_single_element(ds.take(1))
     x1, x2 = x
     try:
@@ -205,15 +201,19 @@ class TransformerMain(object):
         scheduler_callback,
     ]
 
+    """
     valid_ds = dataset.eval_input_fn(params)
     valid_ds = valid_ds.map(
         map_data_fn, num_parallel_calls=params["num_parallel_calls"])
+    """
 
     history = model.fit(
         ds,
         initial_epoch=init_epoch,
         epochs=1,
         steps_per_epoch=1,
+        #validation_data=valid_ds,
+        #validation_steps=1,
         callbacks=callbacks)
     logits = model.predict(x=(x1n, x2n))
     try:

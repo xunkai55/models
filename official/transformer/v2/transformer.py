@@ -43,7 +43,7 @@ def create_model(params, is_train):
       inputs = tf.keras.layers.Input((None,), dtype="int64", name="inputs")
       targets = tf.keras.layers.Input((None,), dtype="int64", name="targets")
       internal_model = TransformerV2(params, is_train)
-      logits = internal_model([inputs, targets])
+      logits = internal_model((inputs, targets))
       logits = tf.keras.layers.Lambda(lambda x: x, name="logits")(logits)
       loss = tf.keras.layers.Lambda(
           lambda i: metrics.transformer_loss(i[0], i[1], params[
@@ -101,6 +101,11 @@ class TransformerV2(tf.keras.Model):
         method="matmul" if params["tpu"] else "gather")
     self.encoder_stack = EncoderStack(params, train)
     self.decoder_stack = DecoderStack(params, train)
+    # Manually build the model, because input shape is dynamic.
+    #
+    # using a list below is important because list here represents multiple
+    # inputs, while the tuples represent shapes.
+    self.build([(None,), (None,)])
 
   def get_config(self):
     return {
@@ -108,12 +113,14 @@ class TransformerV2(tf.keras.Model):
         "train": self.train,
     }
 
-  def call(self, x):  # inputs, targets=None):   x = (inputs, targets=None)
+  def call(self, all_inputs, training=False):
     """Calculates target logits or inferred target sequences.
 
     Args:
-      inputs: int tensor with shape [batch_size, input_length].
-      targets: None or int tensor with shape [batch_size, target_length].
+      all_inputs: Tuple with 2 element (inputs, targets) or 1 element (inputs).
+       - inputs: int tensor with shape [batch_size, input_length].
+       - targets: None or int tensor with shape [batch_size, target_length].
+      training: Bool indicating if the function is called in training.
 
     Returns:
       If targets is defined, then return logits for each word in the target
@@ -123,12 +130,10 @@ class TransformerV2(tf.keras.Model):
           outputs: [batch_size, decoded length]
           scores: [batch_size, float]}
     """
-    if len(x) == 2:
-      (inputs, targets) = x
+    if len(all_inputs) == 2:
+      inputs, targets = all_inputs
     else:
-      (inputs,) = x
-      targets = None
-
+      inputs, targets = (all_inputs[0], None)
     with tf.name_scope("Transformer"):
       # Calculate attention bias for encoder self-attention and decoder
       # multi-headed attention layers.
@@ -139,9 +144,9 @@ class TransformerV2(tf.keras.Model):
       encoder_outputs = self.encode(inputs, attention_bias)
       # Generate output sequence if targets is None, or return logits if target
       # sequence is known.
-      if targets is None:
-        return self.predict(encoder_outputs, attention_bias)
-      else:
+      if targets is None:  # predict
+        return self.predict_sequence(encoder_outputs, attention_bias)
+      else:  # train or eval
         logits = self.decode(targets, encoder_outputs, attention_bias)
         return logits
 
@@ -167,7 +172,7 @@ class TransformerV2(tf.keras.Model):
             length, self.params["hidden_size"])
         encoder_inputs = embedded_inputs + pos_encoding
 
-      if self.train:
+      if self.train and not self.params["no_random"]:
         encoder_inputs = tf.nn.dropout(
             encoder_inputs, rate=self.params["layer_postprocess_dropout"])
 
@@ -198,7 +203,7 @@ class TransformerV2(tf.keras.Model):
         length = tf.shape(decoder_inputs)[1]
         decoder_inputs += model_utils.get_position_encoding(
             length, self.params["hidden_size"])
-      if self.train:
+      if self.train and not self.params["no_random"]:
         decoder_inputs = tf.nn.dropout(
             decoder_inputs, rate=self.params["layer_postprocess_dropout"])
 
@@ -250,7 +255,7 @@ class TransformerV2(tf.keras.Model):
       return logits, cache
     return symbols_to_logits_fn
 
-  def predict(self, encoder_outputs, encoder_decoder_attention_bias):
+  def predict_sequence(self, encoder_outputs, encoder_decoder_attention_bias):
     """Return predicted sequence."""
     batch_size = tf.shape(encoder_outputs)[0]
     input_length = tf.shape(encoder_outputs)[1]
@@ -342,7 +347,7 @@ class PrePostProcessingWrapper(tf.keras.layers.Layer):
     y = self.layer(y, *args, **kwargs)
 
     # Postprocessing: apply dropout and residual connection
-    if self.train:
+    if self.train and not self.params["no_dropout"]:
       y = tf.nn.dropout(y, rate=self.postprocess_dropout)
     return x + y
 

@@ -284,3 +284,34 @@ def eval_input_fn(params):
       file_pattern, params["batch_size"], params["max_length"],
       params["num_parallel_calls"], shuffle=False, repeat=1,
       static_batch=params["static_batch"])
+
+
+# N.B. Original dataset is in the format (inputs, targets). However, for
+# Transformer, the `targets` here is not really used as "targets" in training.
+# Contrarily, `targets` is another input to train the Transformer model. In some
+# training loops like Keras.Model.fit, the dataset is required to pop examples
+# in (x, y) tuple. Thus here we provide following functions to get this type of
+# dataset:
+#
+# 1. get_train_dataset(params)
+# 2. get_eval_dataset(params)
+
+def _wrap_input_target_dataset_fn(x, y):
+  return ((x, y), y)
+
+
+def get_train_dataset(params):
+  """Load and return training dataset containing tuples like (x, y)."""
+  dataset = train_input_fn(params)
+  return dataset.map(
+      _wrap_input_target_dataset_fn,
+      num_parallel_calls=params["num_parallel_calls"])
+
+
+def get_eval_dataset(params):
+  """Load and return eval dataset containing tuples like (x, y)."""
+  dataset = eval_input_fn(params)
+  return dataset.map(
+      _wrap_input_target_dataset_fn,
+      num_parallel_calls=params["num_parallel_calls"])
+
