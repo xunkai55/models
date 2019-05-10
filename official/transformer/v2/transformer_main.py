@@ -94,7 +94,7 @@ def evaluate_and_log_bleu(model, bleu_source, bleu_ref, vocab_file):
 
 
 def all_local_devices(num_gpus):
-  return (tuple("/device:GPU:%d" % i for i in range(num_gpus)) or
+  return (["/device:GPU:%d" % i for i in range(num_gpus)] or
           ("/device:CPU:0",))
 
 
@@ -115,6 +115,8 @@ class TransformerMain(object):
     # Add flag-defined parameters to params object
     num_gpus = flags_core.get_num_gpus(flags_obj)
     self.params = params = misc.get_model_params(flags_obj.param_set, num_gpus)
+    params["num_gpus"] = num_gpus
+    params["no_dist_strat"] = flags_obj.no_dist_strat
 
     params["data_dir"] = flags_obj.data_dir
     params["model_dir"] = flags_obj.model_dir
@@ -226,82 +228,83 @@ class TransformerMain(object):
   def train(self, flags_obj, version):
     params, is_train = self.params, True
 
-    if version == "eager":
-      tf.compat.v1.logging.info("=== Build Eager mode.")
-      model_dict = transformer.create_model(params, is_train)
-      model = model_dict["model"]
-      ds = dataset.train_input_fn(params)
-      self.run_loop()
-    elif version == "keras":
-      tf.compat.v1.logging.info("=== Build Keras mode.")
-      model_dict = transformer.create_model(params, is_train)
-      model = model_dict["model"]
-      targets, logits = model_dict["targets"], model_dict["logits"]
-      '''
-      metric_dict = metrics.create_v2_metrics(self.params["vocab_size"])
-      for k, metric_fn in metric_dict.items():
-        model.add_metric(metric_fn(targets, logits), name=k)
-      '''
-      get_pred_fn = lambda y_label, y_pred: y_pred
-      opt = self._create_optimizer_v2()
-      model.compile(
-          opt, loss={"transformer_loss": get_pred_fn}, target_tensors=[])
-          # Add this parameter to enable Mirrored DS on subclassed models
-      self._load_weights_if_possible(model, flags_obj.init_weight_path)
-      model.summary()
+    with self._create_distribution_strategy().scope():
+      if version == "eager":
+        tf.compat.v1.logging.info("=== Build Eager mode.")
+        model_dict = transformer.create_model(params, is_train)
+        model = model_dict["model"]
+        ds = dataset.train_input_fn(params)
+        self.run_loop()
+      elif version == "keras":
+        tf.compat.v1.logging.info("=== Build Keras mode.")
+        model_dict = transformer.create_model(params, is_train)
+        model = model_dict["model"]
+        targets, logits = model_dict["targets"], model_dict["logits"]
+        '''
+        metric_dict = metrics.create_v2_metrics(self.params["vocab_size"])
+        for k, metric_fn in metric_dict.items():
+          model.add_metric(metric_fn(targets, logits), name=k)
+        '''
+        get_pred_fn = lambda y_label, y_pred: y_pred
+        opt = self._create_optimizer_v2()
+        model.compile(
+            opt, loss={"transformer_loss": get_pred_fn}, cloning=False)
+            # Add this parameter to enable Mirrored DS on subclassed models
+        self._load_weights_if_possible(model, flags_obj.init_weight_path)
+        model.summary()
 
-      map_data_fn = lambda x, y: ((x, y), tf.constant(0.0))
-      ds = dataset.train_input_fn(params)
-      ds = ds.map(map_data_fn, num_parallel_calls=params["num_parallel_calls"])
-      init_epoch = 0 if flags_obj.init_epoch is None else flags_obj.init_epoch
-      init_steps = init_epoch * flags_obj.steps_between_evals
-      trains_epochs = DEFAULT_TRAIN_EPOCHS if flags_obj.train_epochs is None else flags_obj.train_epochs
+        map_data_fn = lambda x, y: ((x, y), y)
+        ds = dataset.train_input_fn(params)
+        ds = ds.map(map_data_fn, num_parallel_calls=params["num_parallel_calls"])
+        init_epoch = 0 if flags_obj.init_epoch is None else flags_obj.init_epoch
+        init_steps = init_epoch * flags_obj.steps_between_evals
+        trains_epochs = DEFAULT_TRAIN_EPOCHS if flags_obj.train_epochs is None else flags_obj.train_epochs
 
-      sfunc = functools.partial(
-          optimizer.get_learning_rate,
-          learning_rate=params["learning_rate"],
-          hidden_size=params["hidden_size"],
-          learning_rate_warmup_steps=params["learning_rate_warmup_steps"])
-      scheduler_callback = optimizer.LearningRateScheduler(
-          sfunc, init_steps, verbose=False)
+        sfunc = functools.partial(
+            optimizer.get_learning_rate,
+            learning_rate=params["learning_rate"],
+            hidden_size=params["hidden_size"],
+            learning_rate_warmup_steps=params["learning_rate_warmup_steps"])
+        scheduler_callback = optimizer.LearningRateScheduler(
+            sfunc, init_steps, verbose=False)
 
-      if flags_obj.init_logdir_timestamp is not None:
-        timestamp = flags_obj.init_logdir_timestamp
-      else:
-        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
-      cur_log_dir = os.path.join(flags_obj.model_dir, timestamp)
-      if not os.path.exists(cur_log_dir):
-        os.makedirs(cur_log_dir)
-      tb_logdir = os.path.join(cur_log_dir, "logs")
-      tb_callbacks = tf.keras.callbacks.TensorBoard(tb_logdir)
-      save_path = os.path.join(
-          cur_log_dir, "weights-epoch-{epoch:02d}-loss-{loss:.4f}.hdf5")
-      csv_path = os.path.join(cur_log_dir, "result.csv")
-      callbacks = [
-          scheduler_callback,
-          tb_callbacks,
-          tf.keras.callbacks.ModelCheckpoint(save_path, save_weights_only=True),
-          tf.keras.callbacks.CSVLogger(csv_path, append=True),
-      ]
+        if flags_obj.init_logdir_timestamp is not None:
+          timestamp = flags_obj.init_logdir_timestamp
+        else:
+          timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+        cur_log_dir = os.path.join(flags_obj.model_dir, timestamp)
+        if not os.path.exists(cur_log_dir):
+          os.makedirs(cur_log_dir)
+        tb_logdir = os.path.join(cur_log_dir, "logs")
+        tb_callbacks = tf.keras.callbacks.TensorBoard(tb_logdir)
+        save_path = os.path.join(
+            cur_log_dir, "weights-epoch-{epoch:02d}-loss-{loss:.4f}.hdf5")
+        csv_path = os.path.join(cur_log_dir, "result.csv")
+        callbacks = [
+            scheduler_callback,
+            tb_callbacks,
+            tf.keras.callbacks.ModelCheckpoint(save_path, save_weights_only=True),
+            tf.keras.callbacks.CSVLogger(csv_path, append=True),
+        ]
 
-      valid_ds = dataset.eval_input_fn(params)
-      valid_ds = valid_ds.map(
-          map_data_fn, num_parallel_calls=params["num_parallel_calls"])
+        valid_ds = dataset.eval_input_fn(params)
+        valid_ds = valid_ds.map(
+            map_data_fn, num_parallel_calls=params["num_parallel_calls"])
 
-      history = model.fit(
-          ds,
-          initial_epoch=init_epoch,
-          epochs=trains_epochs,
-          steps_per_epoch=flags_obj.steps_between_evals,
-          validation_data=valid_ds,
-          validation_steps=64,
-          callbacks=callbacks)
-      tf.compat.v1.logging.info("\nTrain history: {}".format(history.history))
+        history = model.fit(
+            ds,
+            initial_epoch=init_epoch,
+            epochs=trains_epochs,
+            steps_per_epoch=flags_obj.steps_between_evals,
+            validation_data=valid_ds,
+            validation_steps=64,
+            callbacks=callbacks)
+        tf.compat.v1.logging.info("\nTrain history: {}".format(history.history))
 
-      save_weight_path = os.path.join(cur_log_dir, "saves-model-weights.hdf5")
-      save_model_path = os.path.join(cur_log_dir, "saves-model.hdf5")
-      model.save_weights(save_weight_path)
-      model.save(save_model_path)
+        save_weight_path = os.path.join(cur_log_dir, "saves-model-weights.hdf5")
+        save_model_path = os.path.join(cur_log_dir, "saves-model.hdf5")
+        model.save_weights(save_weight_path)
+        model.save(save_model_path)
 
   def eval(self, flags_obj, version):
     params, is_train = self.params, False
@@ -344,9 +347,11 @@ class TransformerMain(object):
       model.load_weights(init_weight_path, by_name=True)
 
   def _create_distribution_strategy(self):
+    if self.params["no_dist_strat"]:
+      return misc.DummyStrategy()
     strat = distribution_utils.get_distribution_strategy(
-        distribution_strategy="mirrored", num_gpus=8)
-    print('========================================= ', strat)
+        distribution_strategy="mirrored", num_gpus=self.params["num_gpus"])
+    print(strat)
     return strat
 
   def _create_optimizer(self, global_step):

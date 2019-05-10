@@ -305,7 +305,7 @@ def get_train_dataset(params):
   dataset = train_input_fn(params)
   return dataset.map(
       _wrap_input_target_dataset_fn,
-      num_parallel_calls=params["num_parallel_calls"])
+      num_parallel_calls=params["num_parallel_calls"]).repeat()
 
 
 def get_eval_dataset(params):
@@ -313,5 +313,5 @@ def get_eval_dataset(params):
   dataset = eval_input_fn(params)
   return dataset.map(
       _wrap_input_target_dataset_fn,
-      num_parallel_calls=params["num_parallel_calls"])
+      num_parallel_calls=params["num_parallel_calls"]).repeat()
 

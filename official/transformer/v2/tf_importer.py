@@ -6,7 +6,11 @@ from __future__ import print_function
 
 import tensorflow as _tf
 
-_is_tf_v2_globally = _tf.__version__.startswith("2.")
+try:
+  import tensorflow.contrib as _contrib
+  _is_tf_v2_globally = False
+except ImportError:
+  _is_tf_v2_globally = True
 
 if _is_tf_v2_globally:
   import tensorflow as tf_v2

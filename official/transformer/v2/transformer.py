@@ -101,11 +101,6 @@ class TransformerV2(tf.keras.Model):
         method="matmul" if params["tpu"] else "gather")
     self.encoder_stack = EncoderStack(params, train)
     self.decoder_stack = DecoderStack(params, train)
-    # Manually build the model, because input shape is dynamic.
-    #
-    # using a list below is important because list here represents multiple
-    # inputs, while the tuples represent shapes.
-    self.build([(None,), (None,)])
 
   def get_config(self):
     return {

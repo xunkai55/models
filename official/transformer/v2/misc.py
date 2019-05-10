@@ -176,7 +176,12 @@ def define_transformer_flags():
       name="no_random",
       default=False,
       help=flags_core.help_wrap(
-        "Turn on to disable random behaviors for testing purpose."))
+          "Turn on to disable random behaviors for testing purpose."))
+  flags.DEFINE_bool(
+      name="no_dist_strat",
+      default=False,
+      help=flags_core.help_wrap(
+          "Turn on to disable distribution strategy."))
 
 
   flags_core.set_defaults(
