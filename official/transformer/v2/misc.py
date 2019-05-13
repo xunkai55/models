@@ -23,6 +23,9 @@ from absl import flags
 from official.transformer.model import model_params
 from official.utils.flags import core as flags_core
 
+from tensorflow.python.eager import profiler
+import tensorflow as tf
+
 PARAMS_MAP = {
     "tiny": model_params.TINY_PARAMS,
     "base": model_params.BASE_PARAMS,
@@ -224,3 +227,25 @@ def define_transformer_flags():
 
   flags_core.require_cloud_storage(["data_dir", "model_dir", "export_dir"])
 
+
+class ProfilerCallback(tf.keras.callbacks.Callback):
+  """Save profiles in specified step range to log directory."""
+
+  def __init__(self, log_dir, start_step, stop_step):
+    super(ProfilerCallback, self).__init__()
+    self.log_dir = log_dir
+    self.start_step = start_step
+    self.stop_step = stop_step
+
+  def on_batch_begin(self, batch, logs=None):
+    if batch == self.start_step:
+      profiler.start()
+      tf.compat.v1.logging.info('Profiler started at Step %s', self.start_step)
+
+  def on_batch_end(self, batch, logs=None):
+    if batch == self.stop_step:
+      results = profiler.stop()
+      profiler.save(self.log_dir, results)
+      tf.compat.v1.logging.info(
+          'Profiler saved profiles for steps between %s and %s to %s',
+          self.start_step, self.stop_step, self.log_dir)

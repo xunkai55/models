@@ -248,7 +248,7 @@ class TransformerMain(object):
         get_pred_fn = lambda y_label, y_pred: y_pred
         opt = self._create_optimizer_v2()
         model.compile(
-            opt, loss={"transformer_loss": get_pred_fn}, cloning=False)
+            opt, loss={"transformer_loss": get_pred_fn}, cloning=True)
             # Add this parameter to enable Mirrored DS on subclassed models
         self._load_weights_if_possible(model, flags_obj.init_weight_path)
         model.summary()
@@ -276,14 +276,16 @@ class TransformerMain(object):
         if not os.path.exists(cur_log_dir):
           os.makedirs(cur_log_dir)
         tb_logdir = os.path.join(cur_log_dir, "logs")
-        tb_callbacks = tf.keras.callbacks.TensorBoard(tb_logdir)
-        save_path = os.path.join(
-            cur_log_dir, "weights-epoch-{epoch:02d}-loss-{loss:.4f}.hdf5")
+        tb_callback = tf.keras.callbacks.TensorBoard(tb_logdir)
+        prof_dir = os.path.join(cur_log_dir, "profile")
+        if not os.path.exists(prof_dir):
+          os.makedirs(prof_dir)
+        profiler_callback = misc.ProfilerCallback(prof_dir, 3, 5)
         csv_path = os.path.join(cur_log_dir, "result.csv")
         callbacks = [
             scheduler_callback,
-            tb_callbacks,
-            tf.keras.callbacks.ModelCheckpoint(save_path, save_weights_only=True),
+            tb_callback,
+            profiler_callback,
             tf.keras.callbacks.CSVLogger(csv_path, append=True),
         ]
 
@@ -301,10 +303,6 @@ class TransformerMain(object):
             callbacks=callbacks)
         tf.compat.v1.logging.info("\nTrain history: {}".format(history.history))
 
-        save_weight_path = os.path.join(cur_log_dir, "saves-model-weights.hdf5")
-        save_model_path = os.path.join(cur_log_dir, "saves-model.hdf5")
-        model.save_weights(save_weight_path)
-        model.save(save_model_path)
 
   def eval(self, flags_obj, version):
     params, is_train = self.params, False

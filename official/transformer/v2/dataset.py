@@ -255,13 +255,13 @@ def _generate_synthetic_data(params):
   """Create synthetic data based on the parameter batch size."""
   batch = length = int(math.sqrt(params["batch_size"]))
   return model_helpers.generate_synthetic_data(
-      input_shape=tf.TensorShape([batch, length]),
+      input_shape=tf.TensorShape([length]),
       input_value=1,
       input_dtype=tf.int32,
-      label_shape=tf.TensorShape([batch, length]),
+      label_shape=tf.TensorShape([length]),
       label_value=1,
       label_dtype=tf.int32,
-  )
+  ).batch(batch)
 
 
 def train_input_fn(params):
