@@ -29,24 +29,8 @@ from __future__ import print_function
 
 import functools
 from official.transformer.v2 import tf_importer
+from tensorflow.python.keras.distribute import distributed_training_utils
 tf = tf_importer.tf
-
-
-def transformer_loss(logits, targets, smoothing, vocab_size):
-  """Calculates total loss containing cross entropy with padding ignored.
-
-  Args:
-    logits: Tensor of size [batch_size, length_logits, vocab_size]
-    labels: Tensor of size [batch_size, length_labels]
-    smoothing: Label smoothing constant, used to determine the on and off values
-    vocab_size: int size of the vocabulary
-
-  Returns:
-    A scalar float tensor for loss.
-  """
-  xentropy, weights = padded_cross_entropy_loss(logits, targets, smoothing,
-                                                vocab_size)
-  return tf.reduce_sum(xentropy) / tf.reduce_sum(weights)
 
 
 def _pad_tensors_to_same_length(x, y):
@@ -89,7 +73,6 @@ def padded_cross_entropy_loss(logits, labels, smoothing, vocab_size):
           off_value=low_confidence)
       xentropy = tf.nn.softmax_cross_entropy_with_logits(
           logits=logits, labels=soft_targets)
-      # xentropy = tf_v1.nn.softmax_cross_entropy_with_logits_v2(logits=logits, labels=soft_targets)
 
       # Calculate the best (lowest) possible value of cross entropy, and
       # subtract from the cross entropy loss.
@@ -153,30 +136,73 @@ def padded_neg_log_perplexity(logits, labels, vocab_size):
   return -num, den
 
 
-class MetricV2Wrapper(object):
-  """Wraps metrics for V2 model."""
+class MetricLayer(tf.keras.layers.Layer):
+  """Custom a layer of metrics for Transformer model."""
 
-  def __init__(self, key, fn):
-    self.fn = fn
-    self.key = key
-    self.__name__ = key
-    self.mean = tf.keras.metrics.Mean(key)
+  def __init__(self, vocab_size):
+    super(MetricLayer, self).__init__()
+    self.vocab_size = vocab_size
+    neg_log_perplexity = functools.partial(
+        padded_neg_log_perplexity, vocab_size=vocab_size)
+    self.metric_dict = {
+        "accuracy": padded_accuracy,
+        "accuracy_top5": padded_accuracy_top5,
+        "accuracy_per_sequence": padded_sequence_accuracy,
+        "neg_log_perplexity": neg_log_perplexity,
+    }
+    self.metric_fn = {}
 
-  def __call__(self, targets, logits):
-    return self.mean(*self.fn(logits, targets))
+  def get_config(self):
+    return {"vocab_size": self.vocab_size}
+
+  def build(self, input_shape):
+    for k, metric_fn in self.metric_dict.items():
+      self.metric_fn[k] = tf.keras.metrics.Mean(k)
+    super(MetricLayer, self).build(input_shape)
+
+  def call(self, inputs):
+    logits, targets = inputs[0], inputs[1]
+    for k, metric_fn in self.metric_dict.items():
+      m = self.metric_fn[k]
+      self.add_metric(distributed_training_utils.call_replica_local_fn(
+          m, *metric_fn(logits, targets)))
+    return logits
 
 
-def create_v2_metrics(vocab_size):
-  neg_log_perplexity = functools.partial(
-      padded_neg_log_perplexity, vocab_size=vocab_size)
-  return {
-      "accuracy":
-          MetricV2Wrapper("accuracy", padded_accuracy),
-      "accuracy_top5":
-          MetricV2Wrapper("accuracy_top5", padded_accuracy_top5),
-      "accuracy_per_sequence":
-          MetricV2Wrapper("accuracy_per_sequence", padded_sequence_accuracy),
-      "neg_log_perplexity":
-          MetricV2Wrapper("neg_log_perplexity", neg_log_perplexity),
-  }
+def transformer_loss(logits, labels, smoothing, vocab_size):
+  """Calculates total loss containing cross entropy with padding ignored.
 
+  Args:
+    logits: Tensor of size [batch_size, length_logits, vocab_size]
+    labels: Tensor of size [batch_size, length_labels]
+    smoothing: Label smoothing constant, used to determine the on and off values
+    vocab_size: int size of the vocabulary
+
+  Returns:
+    A scalar float tensor for loss.
+  """
+  xentropy, weights = padded_cross_entropy_loss(logits, labels, smoothing,
+                                                vocab_size)
+  return tf.reduce_sum(xentropy) / tf.reduce_sum(weights)
+
+
+class LossLayer(tf.keras.layers.Layer):
+  """Custom a layer of transformer loss for Transformer model."""
+
+  def __init__(self, vocab_size, label_smoothing):
+    super(LossLayer, self).__init__()
+    self.vocab_size = vocab_size
+    self.label_smoothing = label_smoothing
+
+  def get_config(self):
+    return {
+        "vocab_size": self.vocab_size,
+        "label_smoothing": self.label_smoothing,
+    }
+
+  def call(self, inputs):
+    logits, targets = inputs[0], inputs[1]
+    loss = transformer_loss(logits, targets, self.label_smoothing,
+                            self.vocab_size)
+    self.add_loss(loss)
+    return loss, logits

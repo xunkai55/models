@@ -34,6 +34,9 @@ from absl import flags
 import numpy as np
 # pylint: enable=g-bad-import-order
 
+from tensorflow.python.client import timeline
+from tensorflow.python.eager import context
+from tensorflow.python.eager import profiler
 from tensorflow.python.keras.distribute import distributed_training_utils
 from official.transformer import compute_bleu
 from official.transformer.utils import schedule
@@ -161,6 +164,8 @@ class TransformerMain(object):
       self.eval(flags_obj, version)
     elif flags_obj.mode == "one_step":
       self.train_one_step(flags_obj, version)
+    elif flags_obj.mode == "data_only":
+      self.consume_data_only(flags_obj, version)
     else:
       raise ValueError("Invalid mode {}".format(flags_obj.mode))
 
@@ -240,18 +245,10 @@ class TransformerMain(object):
         model_dict = transformer.create_model(params, is_train)
         model = model_dict["model"]
         targets, logits = model_dict["targets"], model_dict["logits"]
-        '''
-        metric_dict = metrics.create_v2_metrics(self.params["vocab_size"])
-        for k, metric_fn in metric_dict.items():
-          model.add_metric(metric_fn(targets, logits), name=k)
-        '''
-        get_pred_fn = lambda y_label, y_pred: y_pred
         opt = self._create_optimizer_v2()
-        model.compile(
-            opt, loss={"transformer_loss": get_pred_fn}, cloning=True)
-            # Add this parameter to enable Mirrored DS on subclassed models
-        self._load_weights_if_possible(model, flags_obj.init_weight_path)
+        model.compile(opt)
         model.summary()
+        self._load_weights_if_possible(model, flags_obj.init_weight_path)
 
         map_data_fn = lambda x, y: ((x, y), y)
         ds = dataset.train_input_fn(params)
@@ -277,21 +274,22 @@ class TransformerMain(object):
           os.makedirs(cur_log_dir)
         tb_logdir = os.path.join(cur_log_dir, "logs")
         tb_callback = tf.keras.callbacks.TensorBoard(tb_logdir)
-        prof_dir = os.path.join(cur_log_dir, "profile")
+        prof_dir = os.path.join(tb_logdir, "train")
         if not os.path.exists(prof_dir):
           os.makedirs(prof_dir)
-        profiler_callback = misc.ProfilerCallback(prof_dir, 3, 5)
+        profiler_callback = misc.ProfilerCallback(prof_dir, 3, 8)
         csv_path = os.path.join(cur_log_dir, "result.csv")
         callbacks = [
             scheduler_callback,
-            tb_callback,
-            profiler_callback,
-            tf.keras.callbacks.CSVLogger(csv_path, append=True),
+            # tb_callback,
+            # profiler_callback,
+            # tf.keras.callbacks.CSVLogger(csv_path, append=True),
         ]
 
         valid_ds = dataset.eval_input_fn(params)
         valid_ds = valid_ds.map(
             map_data_fn, num_parallel_calls=params["num_parallel_calls"])
+
 
         history = model.fit(
             ds,
@@ -303,6 +301,20 @@ class TransformerMain(object):
             callbacks=callbacks)
         tf.compat.v1.logging.info("\nTrain history: {}".format(history.history))
 
+  def consume_data_only(self, flags_obj, version):
+    params, is_train = self.params, True
+    map_data_fn = lambda x, y: ((x, y), y)
+    ds = dataset.train_input_fn(params)
+    ds = ds.map(map_data_fn, num_parallel_calls=params["num_parallel_calls"])
+    init_epoch = 0 if flags_obj.init_epoch is None else flags_obj.init_epoch
+    init_steps = init_epoch * flags_obj.steps_between_evals
+    trains_epochs = DEFAULT_TRAIN_EPOCHS if flags_obj.train_epochs is None else flags_obj.train_epochs
+    step = 0
+    for each in ds:
+      print(each[0][0].shape)
+      step += 1
+      if step > flags_obj.steps_between_evals:
+        break
 
   def eval(self, flags_obj, version):
     params, is_train = self.params, False

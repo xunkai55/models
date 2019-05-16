@@ -44,19 +44,19 @@ def create_model(params, is_train):
       targets = tf.keras.layers.Input((None,), dtype="int64", name="targets")
       internal_model = TransformerV2(params, is_train)
       logits = internal_model((inputs, targets))
+
+      vocab_size = params["vocab_size"]
+      label_smoothing = params["label_smoothing"]
+      logits = metrics.MetricLayer(vocab_size)([logits, targets])
+      _, logits = metrics.LossLayer(vocab_size,
+                                    label_smoothing)([logits, targets])
       logits = tf.keras.layers.Lambda(lambda x: x, name="logits")(logits)
-      loss = tf.keras.layers.Lambda(
-          lambda i: metrics.transformer_loss(i[0], i[1], params[
-              "label_smoothing"], params["vocab_size"]),
-          output_shape=(1,),
-          name="transformer_loss")([logits, targets])
-      model = tf.keras.Model([inputs, targets], loss)
+      model = tf.keras.Model([inputs, targets], logits)
       return {
           "model": model,
           "inputs": inputs,
           "targets": targets,
           "logits": logits,
-          "loss": loss,
       }
     else:
       inputs = tf.keras.layers.Input((None,), dtype="int64", name="inputs")

@@ -88,6 +88,7 @@ def _parse_example(serialized_example):
   return inputs, targets
 
 
+@tf.function
 def _filter_max_length(example, max_length=256):
   """Indicates whether the example's length is lower than the maximum length."""
   return tf.logical_and(tf.size(example[0]) <= max_length,
@@ -225,9 +226,10 @@ def _read_and_batch_from_files(
 
   # Read files and interleave results. When training, the order of the examples
   # will be non-deterministic.
-  dataset = dataset.apply(
-      tf.data.experimental.parallel_interleave(
-          _load_records, sloppy=shuffle, cycle_length=num_parallel_calls))
+  dataset = dataset.interleave(
+      _load_records,
+      cycle_length=num_parallel_calls,
+      num_parallel_calls=num_parallel_calls)
 
   # Parse each tf.Example into a dictionary
   # TODO: Look into prefetch_input_elements for performance optimization.
@@ -238,8 +240,8 @@ def _read_and_batch_from_files(
   dataset = dataset.filter(lambda x, y: _filter_max_length((x, y), max_length))
 
   if static_batch:
-    dataset = dataset.apply(tf.data.experimental.padded_batch_and_drop_remainder(
-        batch_size // max_length, ([max_length], [max_length])))
+    dataset = dataset.padded_batch(
+        batch_size // max_length, ([max_length], [max_length]), drop_remainder=True)
   else:
     # Group and batch such that each batch has examples of similar length.
     dataset = _batch_examples(dataset, batch_size, max_length)
