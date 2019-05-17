@@ -120,6 +120,7 @@ class TransformerMain(object):
     self.params = params = misc.get_model_params(flags_obj.param_set, num_gpus)
     params["num_gpus"] = num_gpus
     params["no_dist_strat"] = flags_obj.no_dist_strat
+    params["multi_worker_strat"] = flags_obj.multi_worker_strat
 
     params["data_dir"] = flags_obj.data_dir
     params["model_dir"] = flags_obj.model_dir
@@ -138,20 +139,9 @@ class TransformerMain(object):
     # TPU and GPU, and distribution settings.
     params["batch_size"] = (
         flags_obj.batch_size or params["default_batch_size_tpu"])
+    params["batch_size"] *= params["num_gpus"]
 
     params["repeat_dataset"] = True
-    """self.schedule_manager = schedule_manager = schedule.Manager(
-
-        train_steps=flags_obj.train_steps,
-        steps_between_evals=flags_obj.steps_between_evals,
-        train_epochs=flags_obj.train_epochs,
-        epochs_between_evals=flags_obj.epochs_between_evals,
-        default_train_epochs=flags_obj.train_epochs,
-        batch_size=params["batch_size"],
-        max_length=params["max_length"],
-        use_tpu=params["use_tpu"],
-        num_tpu_shards=flags_obj.num_tpu_shards)
-    """
 
     # Train and evaluate transformer model
     version = flags_obj.model_version
@@ -255,11 +245,11 @@ class TransformerMain(object):
         ds = ds.map(map_data_fn, num_parallel_calls=params["num_parallel_calls"])
         init_epoch = 0 if flags_obj.init_epoch is None else flags_obj.init_epoch
         init_steps = init_epoch * flags_obj.steps_between_evals
-        trains_epochs = DEFAULT_TRAIN_EPOCHS if flags_obj.train_epochs is None else flags_obj.train_epochs
+        trains_epochs = flags_obj.train_epochs
 
         sfunc = functools.partial(
             optimizer.get_learning_rate,
-            learning_rate=params["learning_rate"],
+            learning_rate=params["learning_rate"] * params["num_gpus"],
             hidden_size=params["hidden_size"],
             learning_rate_warmup_steps=params["learning_rate_warmup_steps"])
         scheduler_callback = optimizer.LearningRateScheduler(
@@ -359,8 +349,12 @@ class TransformerMain(object):
   def _create_distribution_strategy(self):
     if self.params["no_dist_strat"]:
       return misc.DummyStrategy()
+    if self.params["multi_worker"]:
+      name = "multi_worker_mirrored"
+    else:
+      name = "mirrored"
     strat = distribution_utils.get_distribution_strategy(
-        distribution_strategy="mirrored", num_gpus=self.params["num_gpus"])
+        distribution_strategy=name, num_gpus=self.params["num_gpus"])
     print(strat)
     return strat
 

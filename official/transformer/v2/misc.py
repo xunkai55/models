@@ -185,6 +185,11 @@ def define_transformer_flags():
       default=False,
       help=flags_core.help_wrap(
           "Turn on to disable distribution strategy."))
+  flags.DEFINE_bool(
+      name="multi_worker_strat",
+      default=False,
+      help=flags_core.help_wrap(
+          "Turn on to use experimental mwm strategy."))
 
 
   flags_core.set_defaults(
