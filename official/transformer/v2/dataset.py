@@ -226,10 +226,13 @@ def _read_and_batch_from_files(
 
   # Read files and interleave results. When training, the order of the examples
   # will be non-deterministic.
+  if shuffle:
+    options = dataset_ops.Options()
+    options.experimental_deterministic = False
   dataset = dataset.interleave(
       _load_records,
       cycle_length=num_parallel_calls,
-      num_parallel_calls=num_parallel_calls)
+      num_parallel_calls=num_parallel_calls).with_options(options)
 
   # Parse each tf.Example into a dictionary
   # TODO: Look into prefetch_input_elements for performance optimization.

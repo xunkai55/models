@@ -358,21 +358,6 @@ class TransformerMain(object):
     print(strat)
     return strat
 
-  def _create_optimizer(self, global_step):
-    params = self.params
-    learning_rate = get_learning_rate(
-        learning_rate=params["learning_rate"],
-        hidden_size=params["hidden_size"],
-        learning_rate_warmup_steps=params["learning_rate_warmup_steps"],
-        global_step=global_step)
-
-    opt = tf.contrib.opt.LazyAdamOptimizer(
-        0.1,
-        beta1=params["optimizer_adam_beta1"],
-        beta2=params["optimizer_adam_beta2"],
-        epsilon=params["optimizer_adam_epsilon"])
-    return opt
-
   def _create_optimizer_v2(self):
     params = self.params
     opt = optimizer.LazyAdam(
