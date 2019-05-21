@@ -28,9 +28,10 @@ from __future__ import division
 from __future__ import print_function
 
 import functools
-from official.transformer.v2 import tf_importer
+
 from tensorflow.python.keras.distribute import distributed_training_utils
-tf = tf_importer.tf
+
+import tensorflow as tf
 
 
 def _pad_tensors_to_same_length(x, y):
@@ -142,30 +143,32 @@ class MetricLayer(tf.keras.layers.Layer):
   def __init__(self, vocab_size):
     super(MetricLayer, self).__init__()
     self.vocab_size = vocab_size
+    self.metric_mean_fns = {}
+
+  def build(self, input_shape):
     neg_log_perplexity = functools.partial(
-        padded_neg_log_perplexity, vocab_size=vocab_size)
-    self.metric_dict = {
-        "accuracy": padded_accuracy,
-        "accuracy_top5": padded_accuracy_top5,
-        "accuracy_per_sequence": padded_sequence_accuracy,
-        "neg_log_perplexity": neg_log_perplexity,
+        padded_neg_log_perplexity, vocab_size=self.vocab_size)
+    self.metric_mean_fns = {
+        tf.keras.metrics.Mean("accuracy"):
+            padded_accuracy,
+        tf.keras.metrics.Mean("accuracy_top5"):
+            padded_accuracy_top5,
+        tf.keras.metrics.Mean("accuracy_per_sequence"):
+            padded_sequence_accuracy,
+        tf.keras.metrics.Mean("neg_log_perplexity"):
+            neg_log_perplexity,
     }
-    self.metric_fn = {}
+    super(MetricLayer, self).build(input_shape)
 
   def get_config(self):
     return {"vocab_size": self.vocab_size}
 
-  def build(self, input_shape):
-    for k, metric_fn in self.metric_dict.items():
-      self.metric_fn[k] = tf.keras.metrics.Mean(k)
-    super(MetricLayer, self).build(input_shape)
-
   def call(self, inputs):
     logits, targets = inputs[0], inputs[1]
-    for k, metric_fn in self.metric_dict.items():
-      m = self.metric_fn[k]
+    for mean, fn in self.metric_mean_fns.items():
+      m = mean(*fn(logits, targets))
       self.add_metric(distributed_training_utils.call_replica_local_fn(
-          m, *metric_fn(logits, targets)))
+          mean, *fn(logits, targets)))
     return logits
 
 
@@ -205,4 +208,5 @@ class LossLayer(tf.keras.layers.Layer):
     loss = transformer_loss(logits, targets, self.label_smoothing,
                             self.vocab_size)
     self.add_loss(loss)
-    return loss, logits
+    return logits
+

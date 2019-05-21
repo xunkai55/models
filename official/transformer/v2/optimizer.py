@@ -12,12 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Variant of the Adam optimizer that handles sparse updates more efficiently.
-
-Compared with the original Adam optimizer, the one in this file can
-provide a large improvement in model training throughput for some
-applications. However, it provides slightly different semantics than the
-original Adam algorithm, and may lead to different empirical results.
+"""Optimizer from addons and learning rate scheduler.
 """
 
 from __future__ import absolute_import
@@ -25,9 +20,7 @@ from __future__ import division
 from __future__ import print_function
 
 import numpy as np
-from official.transformer.v2 import tf_importer
-tf = tf_importer.tf
-tf_v1 = tf_importer.tf_v1
+import tensorflow as tf
 K = tf.keras.backend
 
 
@@ -45,6 +38,9 @@ class LazyAdam(tf.keras.optimizers.Adam):
   original Adam algorithm, and may lead to different empirical results.
   Note, amsgrad is currently not supported and the argument can only be
   False.
+
+  This class is borrowed from:
+  https://github.com/tensorflow/addons/blob/master/tensorflow_addons/optimizers/lazy_adam.py
   """
 
   def _resource_apply_sparse(self, grad, var, indices):
@@ -55,7 +51,7 @@ class LazyAdam(tf.keras.optimizers.Adam):
     local_step = tf.cast(self.iterations + 1, var_dtype)
     beta_1_power = tf.math.pow(beta_1_t, local_step)
     beta_2_power = tf.math.pow(beta_2_t, local_step)
-    epsilon_t = self._get_hyper('epsilon', var_dtype)
+    epsilon_t = tf.convert_to_tensor(self.epsilon, var_dtype)
     lr = (lr_t * tf.math.sqrt(1 - beta_2_power) / (1 - beta_1_power))
 
     # \\(m := beta1 * m + (1 - beta1) * g_t\\)
@@ -71,9 +67,8 @@ class LazyAdam(tf.keras.optimizers.Adam):
 
     # \\(v := beta2 * v + (1 - beta2) * (g_t * g_t)\\)
     v = self.get_slot(var, 'v')
-    v_t_slice = (
-        beta_2_t * tf.gather(v, indices) +
-        (1 - beta_2_t) * tf.math.square(grad))
+    v_t_slice = (beta_2_t * tf.gather(v, indices) +
+                 (1 - beta_2_t) * tf.math.square(grad))
 
     v_update_kwargs = {
         'resource': v.handle,
@@ -95,35 +90,48 @@ class LazyAdam(tf.keras.optimizers.Adam):
     return tf.group(*[var_update_op, m_update_op, v_update_op])
 
 
-def get_learning_rate(global_step, learning_rate, hidden_size,
-                      learning_rate_warmup_steps):
-  """Calculate learning rate with linear warmup and rsqrt decay."""
-  warmup_steps = float(learning_rate_warmup_steps)
-  step = float(global_step)
-  learning_rate *= (hidden_size**-0.5)
-  # Apply linear warmup
-  learning_rate *= np.minimum(1.0, step / warmup_steps)
-  # Apply rsqrt decay
-  learning_rate /= np.sqrt(np.maximum(step, warmup_steps))
-  return learning_rate
+class LearningRateFn(object):
+  """Creates learning rate function."""
+
+  def __init__(self, learning_rate, hidden_size, warmup_steps):
+    self.learning_rate = learning_rate
+    self.hidden_size = hidden_size
+    self.warmup_steps = float(warmup_steps)
+
+  def __call__(self, global_step):
+    """Calculate learning rate with linear warmup and rsqrt decay."""
+    step = float(global_step)
+    learning_rate = self.learning_rate
+    learning_rate *= (self.hidden_size ** -0.5)
+    # Apply linear warmup
+    learning_rate *= np.minimum(1.0, step / self.warmup_steps)
+    # Apply rsqrt decay
+    learning_rate /= np.sqrt(np.maximum(step, self.warmup_steps))
+    return learning_rate
 
 
 class LearningRateScheduler(tf.keras.callbacks.Callback):
+  """Keras callback to schedule learning rate.
 
-  def __init__(self, schedule, init_steps=None, verbose=0):
+  TODO(tianlin): Refactor this scheduler and LearningRateBatchScheduler in
+  official/resnet/keras/keras_common.py.
+  """
+
+  def __init__(self, schedule, init_steps=None, verbose=False):
     super(LearningRateScheduler, self).__init__()
     self.schedule = schedule
     self.verbose = verbose
     if init_steps is None:
       init_steps = 0.0
-    self.steps = float(init_steps)  # Total steps during training.
+    self.steps = float(init_steps)   # Total steps during training.
 
-  def on_train_batch_begin(self, batch, logs=None):
+  def on_epoch_begin(self, epoch, logs=None):
     if not hasattr(self.model.optimizer, 'lr'):
       raise ValueError('Optimizer must have a "lr" attribute.')
     if not hasattr(self.model.optimizer, 'iterations'):
       raise ValueError('Optimizer must have a "iterations" attribute.')
 
+  def on_train_batch_begin(self, batch, logs=None):
     if self.verbose > 0:
       iterations = K.get_value(self.model.optimizer.iterations)
       print('Original iteration %d' % iterations)

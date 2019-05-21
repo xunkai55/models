@@ -18,41 +18,47 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from official.transformer.v2 import tf_importer
-tf = tf_importer.tf
+import tensorflow as tf
 
 
 class Attention(tf.keras.layers.Layer):
   """Multi-headed attention layer."""
 
-  def __init__(self, hidden_size, num_heads, attention_dropout, train):
-    if hidden_size % num_heads != 0:
-      raise ValueError("Hidden size must be evenly divisible by the number of "
-                       "heads.")
+  def __init__(self, hidden_size, num_heads, attention_dropout):
+    """Initialize Attention.
+
+    Args:
+      hidden_size: int, output dim of hidden layer.
+      num_heads: int, number of heads to repeat the same attention structure.
+      attention_dropout: float, dropout rate inside attention for training.
+    """
+    if hidden_size % num_heads:
+      raise ValueError(
+          "Hidden size ({}) must be divisible by the number of heads ({})."
+          .format(hidden_size, num_heads))
 
     super(Attention, self).__init__()
     self.hidden_size = hidden_size
     self.num_heads = num_heads
     self.attention_dropout = attention_dropout
-    self.train = train
 
+  def build(self, input_shape):
     # Layers for linearly projecting the queries, keys, and values.
     self.q_dense_layer = tf.keras.layers.Dense(
-        hidden_size, use_bias=False, name="q")
+        self.hidden_size, use_bias=False, name="q")
     self.k_dense_layer = tf.keras.layers.Dense(
-        hidden_size, use_bias=False, name="k")
+        self.hidden_size, use_bias=False, name="k")
     self.v_dense_layer = tf.keras.layers.Dense(
-        hidden_size, use_bias=False, name="v")
-
+        self.hidden_size, use_bias=False, name="v")
     self.output_dense_layer = tf.keras.layers.Dense(
-        hidden_size, use_bias=False, name="output_transform")
+        self.hidden_size, use_bias=False, name="output_transform")
+    super(Attention, self).build(input_shape)
 
   def get_config(self):
     return {
         "hidden_size": self.hidden_size,
         "num_heads": self.num_heads,
         "attention_dropout": self.attention_dropout,
-        "train": self.train,
     }
 
   def split_heads(self, x):
@@ -95,13 +101,14 @@ class Attention(tf.keras.layers.Layer):
       x = tf.transpose(x, [0, 2, 1, 3])  # --> [batch, length, num_heads, depth]
       return tf.reshape(x, [batch_size, length, self.hidden_size])
 
-  def call(self, x, y, bias, cache=None):
+  def call(self, x, y, bias, training, cache=None):
     """Apply attention mechanism to x and y.
 
     Args:
       x: a tensor with shape [batch_size, length_x, hidden_size]
       y: a tensor with shape [batch_size, length_y, hidden_size]
       bias: attention bias that will be added to the result of the dot product.
+      training: boolean, whether in training mode or not.
       cache: (Used during prediction) dictionary with tensors containing results
         of previous attentions. The dictionary must have the items:
             {"k": tensor with shape [batch_size, i, key_channels],
@@ -141,7 +148,7 @@ class Attention(tf.keras.layers.Layer):
     logits = tf.matmul(q, k, transpose_b=True)
     logits += bias
     weights = tf.nn.softmax(logits, name="attention_weights")
-    if self.train:
+    if training:
       weights = tf.nn.dropout(weights, rate=self.attention_dropout)
     attention_output = tf.matmul(weights, v)
 
@@ -156,6 +163,5 @@ class Attention(tf.keras.layers.Layer):
 class SelfAttention(Attention):
   """Multiheaded self-attention layer."""
 
-  def call(self, x, bias, cache=None):
-    return super(SelfAttention, self).call(x, x, bias, cache)
-
+  def call(self, x, bias, training, cache=None):
+    return super(SelfAttention, self).call(x, x, bias, training, cache)

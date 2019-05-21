@@ -1,4 +1,4 @@
-# Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+# Copyright 2018 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -45,9 +45,6 @@ Two things to note in the pipeline:
    is the list of training files. Second, while reading records using
    `parallel_interleave`, the `sloppy` argument is used to generate randomness
    in the order of the examples.
-
-   It could be useful to disable random behavior for testing purpose. If needed,
-   switch on the "no_random" flag.
 """
 
 from __future__ import absolute_import
@@ -58,6 +55,10 @@ import math
 import os
 
 import tensorflow as tf
+
+# TODO(tianlin) Import internal library. Remove this when different behaviors
+# of keras_model.fit(dataset, ...) for different TF versions are fixed.
+from tensorflow.python import tf2 as tf2_internal
 
 from official.utils.misc import model_helpers
 
@@ -88,7 +89,6 @@ def _parse_example(serialized_example):
   return inputs, targets
 
 
-@tf.function
 def _filter_max_length(example, max_length=256):
   """Indicates whether the example's length is lower than the maximum length."""
   return tf.logical_and(tf.size(example[0]) <= max_length,
@@ -222,37 +222,32 @@ def _read_and_batch_from_files(
   Returns:
     tf.data.Dataset object containing examples loaded from the files.
   """
-  options = tf.data.Options()
-  if shuffle:
-    options.experimental_deterministic = False
-  dataset = tf.data.Dataset.list_files(file_pattern, shuffle=shuffle).with_options(options)
+  dataset = tf.data.Dataset.list_files(file_pattern, shuffle=shuffle)
 
   # Read files and interleave results. When training, the order of the examples
   # will be non-deterministic.
   dataset = dataset.interleave(
       _load_records,
-      cycle_length=100,
-      num_parallel_calls=num_parallel_calls).with_options(options)
+      cycle_length=num_parallel_calls,
+      num_parallel_calls=num_parallel_calls)
 
   # Parse each tf.Example into a dictionary
   # TODO: Look into prefetch_input_elements for performance optimization.
   dataset = dataset.map(_parse_example,
-                        num_parallel_calls=num_parallel_calls).with_options(options)
+                        num_parallel_calls=num_parallel_calls)
 
   # Remove examples where the input or target length exceeds the maximum length,
-  dataset = dataset.filter(lambda x, y: _filter_max_length((x, y), max_length)).with_options(options)
+  dataset = dataset.filter(lambda x, y: _filter_max_length((x, y), max_length))
 
   if static_batch:
     dataset = dataset.padded_batch(
-        batch_size // max_length, ([max_length], [max_length]), drop_remainder=True).with_options(options)
+        batch_size // max_length, ([max_length], [max_length]),
+        drop_remainder=True)
   else:
     # Group and batch such that each batch has examples of similar length.
     dataset = _batch_examples(dataset, batch_size, max_length)
 
-  if repeat == True:
-    dataset = dataset.repeat()
-  else:
-    dataset = dataset.repeat(repeat)
+  dataset = dataset.repeat(repeat)
 
   # Prefetch the next element to improve speed of input pipeline.
   dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
@@ -263,13 +258,13 @@ def _generate_synthetic_data(params):
   """Create synthetic data based on the parameter batch size."""
   batch = length = int(math.sqrt(params["batch_size"]))
   return model_helpers.generate_synthetic_data(
-      input_shape=tf.TensorShape([length]),
+      input_shape=tf.TensorShape([batch, length]),
       input_value=1,
       input_dtype=tf.int32,
-      label_shape=tf.TensorShape([length]),
+      label_shape=tf.TensorShape([batch, length]),
       label_value=1,
       label_dtype=tf.int32,
-  ).batch(batch)
+  )
 
 
 def train_input_fn(params):
@@ -279,7 +274,7 @@ def train_input_fn(params):
     return _generate_synthetic_data(params)
   return _read_and_batch_from_files(
       file_pattern, params["batch_size"], params["max_length"],
-      params["num_parallel_calls"], shuffle=not params["no_random"],
+      params["num_parallel_calls"], shuffle=True,
       repeat=params["repeat_dataset"], static_batch=params["static_batch"])
 
 
@@ -290,20 +285,16 @@ def eval_input_fn(params):
     return _generate_synthetic_data(params)
   return _read_and_batch_from_files(
       file_pattern, params["batch_size"], params["max_length"],
-      params["num_parallel_calls"], shuffle=False, repeat=64,
+      params["num_parallel_calls"], shuffle=False, repeat=1,
       static_batch=params["static_batch"])
 
 
-# N.B. Original dataset is in the format (inputs, targets). However, for
-# Transformer, the `targets` here is not really used as "targets" in training.
-# Contrarily, `targets` is another input to train the Transformer model. In some
-# training loops like Keras.Model.fit, the dataset is required to pop examples
-# in (x, y) tuple. Thus here we provide following functions to get this type of
-# dataset:
-#
-# 1. get_train_dataset(params)
-# 2. get_eval_dataset(params)
-
-def _wrap_input_target_dataset_fn(x, y):
-  return ((x, y), y)
-
+def map_data_for_transformer_fn(x, y):
+  """Maps data for training, and handles weried behaviors for different vers."""
+  # Will transform input x and targets y into tuple(x, y) as new model inputs.
+  if tf2_internal.enabled():
+    # For TF v2, the 2nd parameter is omitted to make Keras training work.
+    return ((x, y),)
+  else:
+    # For TF v1, Keras requires a dummy placeholder as the 2nd parameter.
+    return ((x, y), tf.constant(0.0))

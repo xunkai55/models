@@ -18,17 +18,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import os
-
-# pylint: disable=g-bad-import-order
-from absl import app as absl_app
-from absl import flags
-# pylint: enable=g-bad-import-order
+import tensorflow as tf
 
 from official.transformer.utils import tokenizer
-from official.transformer.v2 import tf_importer
-from official.utils.flags import core as flags_core
-tf = tf_importer.tf
 
 _DECODE_BATCH_SIZE = 32
 _EXTRA_DECODE_LENGTH = 100
@@ -45,7 +37,7 @@ def _get_sorted_inputs(filename):
     Sorted list of inputs, and dictionary mapping original index->sorted index
     of each element.
   """
-  with tf.compat.v1.gfile.Open(filename) as f:
+  with tf.io.gfile.GFile(filename) as f:
     records = f.read().split("\n")
     inputs = [record.strip() for record in records]
     if not inputs[-1]:
@@ -76,11 +68,9 @@ def _trim_and_decode(ids, subtokenizer):
     return subtokenizer.decode(ids)
 
 
-def translate_file(model,
-                   subtokenizer,
-                   input_file,
-                   output_file=None,
-                   print_all_translations=True):
+def translate_file(
+    model, subtokenizer, input_file, output_file=None,
+    print_all_translations=True):
   """Translate lines in file, and save to output file if specified.
 
   Args:
@@ -118,9 +108,8 @@ def translate_file(model,
       yield batch
 
   translations = []
-  # for i, prediction in enumerate(model.predict(input_fn)):
   for i, text in enumerate(input_generator()):
-    val_outputs, val_scores = model.predict(text)
+    val_outputs, _ = model.predict(text)
 
     length = len(val_outputs)
     for j in range(length):
@@ -142,115 +131,16 @@ def translate_file(model,
         f.write("%s\n" % translations[i])
 
 
-def translate_text(estimator, subtokenizer, txt):
-  """Translate a single string."""
-  encoded_txt = _encode_and_add_eos(txt, subtokenizer)
-
-  def input_fn():
-    ds = tf.data.Dataset.from_tensors(encoded_txt)
-    ds = ds.batch(_DECODE_BATCH_SIZE)
-    return ds
-
-  predictions = estimator.predict(input_fn)
-  translation = next(predictions)["outputs"]
-  translation = _trim_and_decode(translation, subtokenizer)
-  tf.compat.v1.logging.info("Translation of \"%s\": \"%s\"" %
-                            (txt, translation))
-
-
 def translate_from_text(model, subtokenizer, txt):
   encoded_txt = _encode_and_add_eos(txt, subtokenizer)
   result = model.predict(encoded_txt)
   outputs = result["outputs"]
+  tf.compat.v1.logging.info("Original: \"%s\"" % txt)
   translate_from_input(outputs, subtokenizer)
 
 
 def translate_from_input(outputs, subtokenizer):
   translation = _trim_and_decode(outputs, subtokenizer)
-  tf.compat.v1.logging.info("Translation of ...: \"%s\"" % translation)
+  tf.compat.v1.logging.info("Translation: \"%s\"" % translation)
 
-
-def main(unused_argv):
-  tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.INFO)
-
-  if FLAGS.text is None and FLAGS.file is None:
-    tf.compat.v1.logging.warn(
-        "Nothing to translate. Make sure to call this script using "
-        "flags --text or --file.")
-    return
-
-  subtokenizer = tokenizer.Subtokenizer(FLAGS.vocab_file)
-
-  # Set up estimator and params
-  params = transformer_main.PARAMS_MAP[FLAGS.param_set]
-  params["beam_size"] = _BEAM_SIZE
-  params["alpha"] = _ALPHA
-  params["extra_decode_length"] = _EXTRA_DECODE_LENGTH
-  params["batch_size"] = _DECODE_BATCH_SIZE
-  estimator = tf.estimator.Estimator(
-      model_fn=transformer_main.model_fn, model_dir=FLAGS.model_dir,
-      params=params)
-
-  if FLAGS.text is not None:
-    tf.compat.v1.logging.info("Translating text: %s" % FLAGS.text)
-    translate_text(estimator, subtokenizer, FLAGS.text)
-
-  if FLAGS.file is not None:
-    input_file = os.path.abspath(FLAGS.file)
-    tf.compat.v1.logging.info("Translating file: %s" % input_file)
-    if not tf.io.gfile.exists(FLAGS.file):
-      raise ValueError("File does not exist: %s" % input_file)
-
-    output_file = None
-    if FLAGS.file_out is not None:
-      output_file = os.path.abspath(FLAGS.file_out)
-      tf.compat.v1.logging.info("File output specified: %s" % output_file)
-
-    translate_file(estimator, subtokenizer, input_file, output_file)
-
-
-def define_translate_flags():
-  """Define flags used for translation script."""
-  # Model flags
-  flags.DEFINE_string(
-      name="model_dir", short_name="md", default="/tmp/transformer_model",
-      help=flags_core.help_wrap(
-          "Directory containing Transformer model checkpoints."))
-  flags.DEFINE_enum(
-      name="param_set", short_name="mp", default="big",
-      enum_values=["base", "big"],
-      help=flags_core.help_wrap(
-          "Parameter set to use when creating and training the model. The "
-          "parameters define the input shape (batch size and max length), "
-          "model configuration (size of embedding, # of hidden layers, etc.), "
-          "and various other settings. The big parameter set increases the "
-          "default batch size, embedding/hidden size, and filter size. For a "
-          "complete list of parameters, please see model/model_params.py."))
-  flags.DEFINE_string(
-      name="vocab_file", short_name="vf", default=None,
-      help=flags_core.help_wrap(
-          "Path to subtoken vocabulary file. If data_download.py was used to "
-          "download and encode the training data, look in the data_dir to find "
-          "the vocab file."))
-  flags.mark_flag_as_required("vocab_file")
-
-  flags.DEFINE_string(
-      name="text", default=None,
-      help=flags_core.help_wrap(
-          "Text to translate. Output will be printed to console."))
-  flags.DEFINE_string(
-      name="file", default=None,
-      help=flags_core.help_wrap(
-          "File containing text to translate. Translation will be printed to "
-          "console and, if --file_out is provided, saved to an output file."))
-  flags.DEFINE_string(
-      name="file_out", default=None,
-      help=flags_core.help_wrap(
-          "If --file flag is specified, save translation to this file."))
-
-
-if __name__ == "__main__":
-  define_translate_flags()
-  FLAGS = flags.FLAGS
-  tf.compat.v1.app.run(main)
 
