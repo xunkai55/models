@@ -240,7 +240,10 @@ class TransformerMain(object):
         model.summary()
         self._load_weights_if_possible(model, flags_obj.init_weight_path)
 
-        map_data_fn = lambda x, y: ((x, y), y)
+        if self.params["no_dist_strat"]:
+          map_data_fn = lambda x, y: ((x, y),)
+        else:
+          map_data_fn = lambda x, y: ((x, y), y)
         ds = dataset.train_input_fn(params)
         ds = ds.map(map_data_fn, num_parallel_calls=params["num_parallel_calls"])
         init_epoch = 0 if flags_obj.init_epoch is None else flags_obj.init_epoch
@@ -349,7 +352,7 @@ class TransformerMain(object):
   def _create_distribution_strategy(self):
     if self.params["no_dist_strat"]:
       return misc.DummyStrategy()
-    if self.params["multi_worker"]:
+    if self.params["multi_worker_strat"]:
       name = "multi_worker_mirrored"
     else:
       name = "mirrored"

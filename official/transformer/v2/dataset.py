@@ -222,29 +222,29 @@ def _read_and_batch_from_files(
   Returns:
     tf.data.Dataset object containing examples loaded from the files.
   """
-  dataset = tf.data.Dataset.list_files(file_pattern, shuffle=shuffle)
+  options = tf.data.Options()
+  if shuffle:
+    options.experimental_deterministic = False
+  dataset = tf.data.Dataset.list_files(file_pattern, shuffle=shuffle).with_options(options)
 
   # Read files and interleave results. When training, the order of the examples
   # will be non-deterministic.
-  if shuffle:
-    options = dataset_ops.Options()
-    options.experimental_deterministic = False
   dataset = dataset.interleave(
       _load_records,
-      cycle_length=num_parallel_calls,
+      cycle_length=100,
       num_parallel_calls=num_parallel_calls).with_options(options)
 
   # Parse each tf.Example into a dictionary
   # TODO: Look into prefetch_input_elements for performance optimization.
   dataset = dataset.map(_parse_example,
-                        num_parallel_calls=num_parallel_calls)
+                        num_parallel_calls=num_parallel_calls).with_options(options)
 
   # Remove examples where the input or target length exceeds the maximum length,
-  dataset = dataset.filter(lambda x, y: _filter_max_length((x, y), max_length))
+  dataset = dataset.filter(lambda x, y: _filter_max_length((x, y), max_length)).with_options(options)
 
   if static_batch:
     dataset = dataset.padded_batch(
-        batch_size // max_length, ([max_length], [max_length]), drop_remainder=True)
+        batch_size // max_length, ([max_length], [max_length]), drop_remainder=True).with_options(options)
   else:
     # Group and batch such that each batch has examples of similar length.
     dataset = _batch_examples(dataset, batch_size, max_length)
