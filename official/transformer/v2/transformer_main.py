@@ -248,7 +248,7 @@ class TransformerMain(object):
         ds = ds.map(map_data_fn, num_parallel_calls=params["num_parallel_calls"])
         init_epoch = 0 if flags_obj.init_epoch is None else flags_obj.init_epoch
         init_steps = init_epoch * flags_obj.steps_between_evals
-        trains_epochs = flags_obj.train_epochs
+        train_epochs = flags_obj.train_epochs
 
         sfunc = functools.partial(
             optimizer.get_learning_rate,
@@ -283,11 +283,10 @@ class TransformerMain(object):
         valid_ds = valid_ds.map(
             map_data_fn, num_parallel_calls=params["num_parallel_calls"])
 
-
         history = model.fit(
             ds,
             initial_epoch=init_epoch,
-            epochs=trains_epochs,
+            epochs=train_epochs,
             steps_per_epoch=flags_obj.steps_between_evals,
             validation_data=valid_ds,
             validation_steps=64,
@@ -302,6 +301,8 @@ class TransformerMain(object):
     init_epoch = 0 if flags_obj.init_epoch is None else flags_obj.init_epoch
     init_steps = init_epoch * flags_obj.steps_between_evals
     trains_epochs = DEFAULT_TRAIN_EPOCHS if flags_obj.train_epochs is None else flags_obj.train_epochs
+
+
     step = 0
     for each in ds:
       print(each[0][0].shape)

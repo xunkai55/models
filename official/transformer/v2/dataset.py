@@ -249,7 +249,10 @@ def _read_and_batch_from_files(
     # Group and batch such that each batch has examples of similar length.
     dataset = _batch_examples(dataset, batch_size, max_length)
 
-  dataset = dataset.repeat(repeat)
+  if repeat == True:
+    dataset = dataset.repeat()
+  else:
+    dataset = dataset.repeat(repeat)
 
   # Prefetch the next element to improve speed of input pipeline.
   dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
@@ -287,7 +290,7 @@ def eval_input_fn(params):
     return _generate_synthetic_data(params)
   return _read_and_batch_from_files(
       file_pattern, params["batch_size"], params["max_length"],
-      params["num_parallel_calls"], shuffle=False, repeat=1,
+      params["num_parallel_calls"], shuffle=False, repeat=64,
       static_batch=params["static_batch"])
 
 
@@ -303,20 +306,4 @@ def eval_input_fn(params):
 
 def _wrap_input_target_dataset_fn(x, y):
   return ((x, y), y)
-
-
-def get_train_dataset(params):
-  """Load and return training dataset containing tuples like (x, y)."""
-  dataset = train_input_fn(params)
-  return dataset.map(
-      _wrap_input_target_dataset_fn,
-      num_parallel_calls=params["num_parallel_calls"]).repeat()
-
-
-def get_eval_dataset(params):
-  """Load and return eval dataset containing tuples like (x, y)."""
-  dataset = eval_input_fn(params)
-  return dataset.map(
-      _wrap_input_target_dataset_fn,
-      num_parallel_calls=params["num_parallel_calls"]).repeat()
 
