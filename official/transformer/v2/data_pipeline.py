@@ -291,10 +291,6 @@ def map_data_for_transformer_fn_tf2(x, y):
   # For TF v2, the 2nd parameter is omitted to make Keras training work.
   return ((x, y),)
 
-def map_data_for_transformer_fn_tf_ds(x, y):
-  # For Distribution Strategy, it requries Y with same 1st dimension with x.
-  return ((x, y), y)
-
 def map_data_for_transformer_fn_tf1(x, y):
   # For TF v1, Keras requires a dummy placeholder as the 2nd parameter.
   return ((x, y), tf.constant(0.0))

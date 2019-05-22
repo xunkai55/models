@@ -127,10 +127,7 @@ class TransformerTask(object):
       _ensure_dir(cur_log_dir)
 
       if tf2_internal.enabled():
-        if params["no_dist_strat"]:
-          map_data_fn = data_pipeline.map_data_for_transformer_fn_tf2
-        else:
-          map_data_fn = data_pipeline.map_data_for_transformer_fn_tf_ds
+        map_data_fn = data_pipeline.map_data_for_transformer_fn_tf2
       else:
         map_data_fn = data_pipeline.map_data_for_transformer_fn_tf1
       train_ds = data_pipeline.train_input_fn(params)
