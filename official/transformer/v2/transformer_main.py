@@ -104,6 +104,7 @@ class TransformerTask(object):
         flags_obj.num_parallel_calls or tf.data.experimental.AUTOTUNE)
 
     params["use_synthetic_data"] = flags_obj.use_synthetic_data
+    params["static_batch"] = flags_obj.static_batch
     params["batch_size"] = flags_obj.batch_size or params["default_batch_size"]
     params["repeat_dataset"] = None
 
@@ -121,7 +122,7 @@ class TransformerTask(object):
       cur_log_dir = _get_log_dir_or_default(flags_obj)
       _ensure_dir(cur_log_dir)
 
-      map_data_fn = data_pipeline.map_data_for_transformer_fn
+      map_data_fn = lambda x, y: ((x, y), y)
       train_ds = data_pipeline.train_input_fn(params)
       train_ds = train_ds.map(
           map_data_fn, num_parallel_calls=params["num_parallel_calls"])

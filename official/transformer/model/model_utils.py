@@ -20,7 +20,7 @@ from __future__ import print_function
 
 import math
 
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 _NEG_INF = -1e9
 
