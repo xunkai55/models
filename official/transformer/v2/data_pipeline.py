@@ -294,7 +294,7 @@ def map_data_for_transformer_fn(x, y):
   # Will transform input x and targets y into tuple(x, y) as new model inputs.
   if tf2_internal.enabled():
     # For TF v2, the 2nd parameter is omitted to make Keras training work.
-    return ((x, y),)
+    return ((x, y), y)
   else:
     # For TF v1, Keras requires a dummy placeholder as the 2nd parameter.
     return ((x, y), tf.constant(0.0))

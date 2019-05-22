@@ -40,6 +40,7 @@ from official.transformer.v2 import transformer
 from official.transformer.v2 import translate
 from official.utils.flags import core as flags_core
 from official.utils.logs import logger
+from official.utils.misc import distribution_utils
 
 
 INF = int(1e9)

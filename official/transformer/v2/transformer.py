@@ -13,7 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 """Defines the Transformer model in TF 2.0.
-
 Model paper: https://arxiv.org/pdf/1706.03762.pdf
 Transformer model code source: https://github.com/tensorflow/tensor2tensor
 """
@@ -57,9 +56,7 @@ def create_model(params, is_train):
 
 class Transformer(tf.keras.Model):
   """Transformer model with Keras.
-
   Implemented as described in: https://arxiv.org/pdf/1706.03762.pdf
-
   The Transformer model consists of an encoder and decoder. The input is an int
   sequence (or a batch of sequences). The encoder produces a continuous
   representation, and the decoder uses the encoder output to generate
@@ -68,7 +65,6 @@ class Transformer(tf.keras.Model):
 
   def __init__(self, params, name=None):
     """Initialize layers to build Transformer model.
-
     Args:
       params: hyperparameter object defining layer sizes, dropout values, etc.
       name: name of the model.
@@ -87,14 +83,12 @@ class Transformer(tf.keras.Model):
 
   def call(self, x, training):
     """Calculate target logits or inferred target sequences.
-
     Args:
       x: input tensor list of size 1 or 2.
         First item, inputs: int tensor with shape [batch_size, input_length].
         Second item (optional), targets: None or int tensor with shape
           [batch_size, target_length].
       training: boolean, whether in training mode or not.
-
     Returns:
       If targets is defined, then return logits for each word in the target
       sequence. float tensor with shape [batch_size, target_length, vocab_size]
@@ -117,23 +111,21 @@ class Transformer(tf.keras.Model):
 
       # Run the inputs through the encoder layer to map the symbol
       # representations to continuous representations.
-      encoder_outputs = self.encode(inputs, attention_bias)
+      encoder_outputs = self.encode(inputs, attention_bias, training)
       # Generate output sequence if targets is None, or return logits if target
       # sequence is known.
-      if targets is None:  # predict
-        return self.predict_sequence(encoder_outputs, attention_bias)
-      else:  # train or eval
-        logits = self.decode(targets, encoder_outputs, attention_bias)
+      if targets is None:
+        return self.predict(encoder_outputs, attention_bias, training)
+      else:
+        logits = self.decode(targets, encoder_outputs, attention_bias, training)
         return logits
 
-  def encode(self, inputs, attention_bias):
+  def encode(self, inputs, attention_bias, training):
     """Generate continuous representation for inputs.
-
     Args:
       inputs: int tensor with shape [batch_size, input_length].
       attention_bias: float tensor with shape [batch_size, 1, 1, input_length].
       training: boolean, whether in training mode or not.
-
     Returns:
       float tensor with shape [batch_size, input_length, hidden_size]
     """
@@ -158,7 +150,6 @@ class Transformer(tf.keras.Model):
 
   def decode(self, targets, encoder_outputs, attention_bias, training):
     """Generate logits for each value in the target sequence.
-
     Args:
       targets: target values for the output sequence. int tensor with shape
         [batch_size, target_length]
@@ -166,7 +157,6 @@ class Transformer(tf.keras.Model):
         with shape [batch_size, input_length, hidden_size]
       attention_bias: float tensor with shape [batch_size, 1, 1, input_length]
       training: boolean, whether in training mode or not.
-
     Returns:
       float32 tensor with shape [batch_size, target_length, vocab_size]
     """
@@ -208,14 +198,12 @@ class Transformer(tf.keras.Model):
 
     def symbols_to_logits_fn(ids, i, cache):
       """Generate logits for next potential IDs.
-
       Args:
         ids: Current decoded sequences. int tensor with shape [batch_size *
           beam_size, i + 1]
         i: Loop index
         cache: dictionary of values storing the encoder output, encoder-decoder
           attention bias, and previous decoder attention values.
-
       Returns:
         Tuple of
           (logits with shape [batch_size * beam_size, vocab_size],
@@ -354,7 +342,6 @@ class PrePostProcessingWrapper(tf.keras.layers.Layer):
 
 class EncoderStack(tf.keras.layers.Layer):
   """Transformer encoder stack.
-
   The encoder stack is made up of N identical layers. Each layer is composed
   of the sublayers:
     1. Self-attention layer
@@ -392,7 +379,6 @@ class EncoderStack(tf.keras.layers.Layer):
 
   def call(self, encoder_inputs, attention_bias, inputs_padding, training):
     """Return the output of the encoder layer stacks.
-
     Args:
       encoder_inputs: tensor with shape [batch_size, input_length, hidden_size]
       attention_bias: bias for the encoder self-attention layer. [batch_size, 1,
@@ -400,7 +386,6 @@ class EncoderStack(tf.keras.layers.Layer):
       inputs_padding: tensor with shape [batch_size, input_length], inputs with
         zero paddings.
       training: boolean, whether in training mode or not.
-
     Returns:
       Output of encoder layer stack.
       float32 tensor with shape [batch_size, input_length, hidden_size]
@@ -423,7 +408,6 @@ class EncoderStack(tf.keras.layers.Layer):
 
 class DecoderStack(tf.keras.layers.Layer):
   """Transformer decoder stack.
-
   Like the encoder stack, the decoder stack is made up of N identical layers.
   Each layer is composed of the sublayers:
     1. Self-attention layer
@@ -470,7 +454,6 @@ class DecoderStack(tf.keras.layers.Layer):
            training,
            cache=None):
     """Return the output of the decoder layer stacks.
-
     Args:
       decoder_inputs: tensor with shape [batch_size, target_length, hidden_size]
       encoder_outputs: tensor with shape [batch_size, input_length, hidden_size]
@@ -484,6 +467,7 @@ class DecoderStack(tf.keras.layers.Layer):
           {layer_n: {"k": tensor with shape [batch_size, i, key_channels],
                      "v": tensor with shape [batch_size, i, value_channels]},
                        ...}
+    Returns:
       Output of decoder layer stack.
       float32 tensor with shape [batch_size, target_length, hidden_size]
     """

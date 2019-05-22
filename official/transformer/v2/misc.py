@@ -30,6 +30,17 @@ PARAMS_MAP = {
 }
 
 
+class DummyStrategy(object):
+  class DummyContextManager(object):
+    def __enter__(self):
+      pass
+    def __exit__(self, ext, exv, tb):
+      pass
+
+  def scope(self):
+    return DummyStrategy.DummyContextManager()
+
+
 def get_model_params(param_set, num_gpus):
   """Gets predefined model params."""
   if num_gpus > 1:
@@ -129,6 +140,14 @@ def define_transformer_flags():
   flags.DEFINE_string(
       name="mode", default="train",
       help=flags_core.help_wrap("mode: train, eval, or predict"))
+
+  # dist training
+  flags.DEFINE_bool(
+      name="no_dist_strat", default=False, help=flags_core.help_wrap(
+          "Turn on it to disable any distribution strategy."))
+  flags.DEFINE_bool(
+      name="multi_worker_strat", default=False, help=flags_core.help_wrap(
+          "Turn on it to enable experimental multi worker mirrored strategy."))
 
   flags_core.set_defaults(data_dir="/tmp/translate_ende",
                           model_dir="/tmp/transformer_model",

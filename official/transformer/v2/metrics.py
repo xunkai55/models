@@ -13,7 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 """Functions for calculating loss, accuracy, and other model metrics.
-
 Metrics:
  - Padded loss, accuracy, and negative log perplexity. Source:
      https://github.com/tensorflow/tensor2tensor/blob/master/tensor2tensor/utils/metrics.py
@@ -27,9 +26,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import functools
-
 from tensorflow.python.keras.distribute import distributed_training_utils
+
+import functools
 
 import tensorflow as tf
 
@@ -49,13 +48,11 @@ def _pad_tensors_to_same_length(x, y):
 
 def padded_cross_entropy_loss(logits, labels, smoothing, vocab_size):
   """Calculate cross entropy loss while ignoring padding.
-
   Args:
     logits: Tensor of size [batch_size, length_logits, vocab_size]
     labels: Tensor of size [batch_size, length_labels]
     smoothing: Label smoothing constant, used to determine the on and off values
     vocab_size: int size of the vocabulary
-
   Returns:
     Returns the cross entropy loss and weight tensors: float32 tensors with
       shape [batch_size, max(length_logits, length_labels)]
@@ -143,21 +140,17 @@ class MetricLayer(tf.keras.layers.Layer):
   def __init__(self, vocab_size):
     super(MetricLayer, self).__init__()
     self.vocab_size = vocab_size
-    self.metric_mean_fns = {}
+    self.metric_mean_fns = []
 
   def build(self, input_shape):
     neg_log_perplexity = functools.partial(
         padded_neg_log_perplexity, vocab_size=self.vocab_size)
-    self.metric_mean_fns = {
-        tf.keras.metrics.Mean("accuracy"):
-            padded_accuracy,
-        tf.keras.metrics.Mean("accuracy_top5"):
-            padded_accuracy_top5,
-        tf.keras.metrics.Mean("accuracy_per_sequence"):
-            padded_sequence_accuracy,
-        tf.keras.metrics.Mean("neg_log_perplexity"):
-            neg_log_perplexity,
-    }
+    self.metric_mean_fns = [
+        (tf.keras.metrics.Mean("accuracy"), padded_accuracy),
+        (tf.keras.metrics.Mean("accuracy_top5"), padded_accuracy_top5),
+        (tf.keras.metrics.Mean("accuracy_per_sequence"), padded_sequence_accuracy),
+        (tf.keras.metrics.Mean("neg_log_perplexity"), neg_log_perplexity)
+    ]
     super(MetricLayer, self).build(input_shape)
 
   def get_config(self):
@@ -165,8 +158,7 @@ class MetricLayer(tf.keras.layers.Layer):
 
   def call(self, inputs):
     logits, targets = inputs[0], inputs[1]
-    for mean, fn in self.metric_mean_fns.items():
-      m = mean(*fn(logits, targets))
+    for mean, fn in self.metric_mean_fns:
       self.add_metric(distributed_training_utils.call_replica_local_fn(
           mean, *fn(logits, targets)))
     return logits
@@ -174,13 +166,11 @@ class MetricLayer(tf.keras.layers.Layer):
 
 def transformer_loss(logits, labels, smoothing, vocab_size):
   """Calculates total loss containing cross entropy with padding ignored.
-
   Args:
     logits: Tensor of size [batch_size, length_logits, vocab_size]
     labels: Tensor of size [batch_size, length_labels]
     smoothing: Label smoothing constant, used to determine the on and off values
     vocab_size: int size of the vocabulary
-
   Returns:
     A scalar float tensor for loss.
   """
