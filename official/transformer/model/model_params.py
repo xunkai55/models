@@ -82,7 +82,7 @@ BASE_MULTI_GPU_PARAMS.update(
 BIG_MULTI_GPU_PARAMS = BIG_PARAMS.copy()
 BIG_MULTI_GPU_PARAMS.update(
     layer_postprocess_dropout=0.3,
-    learning_rate_warmup_steps=8000
+    learning_rate_warmup_steps=2000
 )
 
 # Parameters for testing the model

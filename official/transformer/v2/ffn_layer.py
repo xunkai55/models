@@ -75,3 +75,4 @@ class FeedForwardNetwork(tf.keras.layers.Layer):
     output = self.output_dense_layer(output)
 
     return output
+

@@ -26,10 +26,7 @@ from __future__ import print_function
 import os
 import sys
 
-# pylint: disable=g-bad-import-order
-from absl import app as absl_app
-import tensorflow as tf
-# pylint: enable=g-bad-import-order
+import tensorflow as tf  # pylint: disable=g-bad-import-order
 
 # For open source environment, add grandparent directory for import
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(sys.path[0]))))

@@ -40,6 +40,7 @@ from official.transformer.v2 import transformer
 from official.transformer.v2 import translate
 from official.utils.flags import core as flags_core
 from official.utils.logs import logger
+from official.utils.misc import distribution_utils
 
 
 INF = int(1e9)
@@ -93,6 +94,9 @@ class TransformerTask(object):
     # Add flag-defined parameters to params object
     num_gpus = flags_core.get_num_gpus(flags_obj)
     self.params = params = misc.get_model_params(flags_obj.param_set, num_gpus)
+    params["num_gpus"] = num_gpus
+    params["no_dist_strat"] = flags_obj.no_dist_strat
+    params["multi_worker_strat"] = flags_obj.multi_worker_strat
 
     params["data_dir"] = flags_obj.data_dir
     params["model_dir"] = flags_obj.model_dir
@@ -105,43 +109,44 @@ class TransformerTask(object):
 
   def train(self):
     """Trains the model."""
-    params, flags_obj, is_train = self.params, self.flags_obj, True
-    model = transformer.create_model(params, is_train)
-    opt = self._create_optimizer()
+    with self._create_distribution_strategy().scope():
+      params, flags_obj, is_train = self.params, self.flags_obj, True
+      model = transformer.create_model(params, is_train)
+      opt = self._create_optimizer()
 
-    model.compile(opt, target_tensors=[])
-    model.summary()
-    self._load_weights_if_possible(model, flags_obj.init_weight_path)
+      model.compile(opt, target_tensors=[])
+      model.summary()
+      self._load_weights_if_possible(model, flags_obj.init_weight_path)
 
-    cur_log_dir = _get_log_dir_or_default(flags_obj)
-    _ensure_dir(cur_log_dir)
+      cur_log_dir = _get_log_dir_or_default(flags_obj)
+      _ensure_dir(cur_log_dir)
 
-    map_data_fn = data_pipeline.map_data_for_transformer_fn
-    train_ds = data_pipeline.train_input_fn(params)
-    train_ds = train_ds.map(
-        map_data_fn, num_parallel_calls=params["num_parallel_calls"])
-    valid_ds = data_pipeline.eval_input_fn(params)
-    valid_ds = valid_ds.map(
-        map_data_fn, num_parallel_calls=params["num_parallel_calls"])
+      map_data_fn = data_pipeline.map_data_for_transformer_fn
+      train_ds = data_pipeline.train_input_fn(params)
+      train_ds = train_ds.map(
+          map_data_fn, num_parallel_calls=params["num_parallel_calls"])
+      valid_ds = data_pipeline.eval_input_fn(params)
+      valid_ds = valid_ds.map(
+          map_data_fn, num_parallel_calls=params["num_parallel_calls"])
 
-    init_epoch = flags_obj.init_epoch or 0
-    init_steps = init_epoch * flags_obj.steps_per_epoch
-    callbacks = self._create_callbacks(cur_log_dir, init_steps, params)
+      init_epoch = flags_obj.init_epoch or 0
+      init_steps = init_epoch * flags_obj.steps_per_epoch
+      callbacks = self._create_callbacks(cur_log_dir, init_steps, params)
 
-    history = model.fit(
-        train_ds,
-        initial_epoch=init_epoch,
-        epochs=flags_obj.train_epochs,
-        steps_per_epoch=flags_obj.steps_per_epoch,
-        validation_data=valid_ds,
-        validation_steps=flags_obj.validation_steps,
-        callbacks=callbacks)
-    tf.compat.v1.logging.info("\nTrain history: {}".format(history.history))
+      history = model.fit(
+          train_ds,
+          initial_epoch=init_epoch,
+          epochs=flags_obj.train_epochs,
+          steps_per_epoch=flags_obj.steps_per_epoch,
+          validation_data=valid_ds,
+          validation_steps=flags_obj.validation_steps,
+          callbacks=callbacks)
+      tf.compat.v1.logging.info("\nTrain history: {}".format(history.history))
 
-    save_weight_path = os.path.join(cur_log_dir, "saves-model-weights.hdf5")
-    save_model_path = os.path.join(cur_log_dir, "saves-model.hdf5")
-    model.save_weights(save_weight_path)
-    model.save(save_model_path)
+      save_weight_path = os.path.join(cur_log_dir, "saves-model-weights.hdf5")
+      save_model_path = os.path.join(cur_log_dir, "saves-model.hdf5")
+      model.save_weights(save_weight_path)
+      model.save(save_model_path)
 
   def eval(self):
     """Evaluates the model."""
@@ -173,7 +178,7 @@ class TransformerTask(object):
 
   def _create_callbacks(self, cur_log_dir, init_steps, params):
     """Creates a list of callbacks."""
-    sfunc = optimizer.LearningRateFn(params["learning_rate"],
+    sfunc = optimizer.LearningRateFn(params["learning_rate"] * params["num_gpus"],
                                      params["hidden_size"],
                                      params["learning_rate_warmup_steps"])
     scheduler_callback = optimizer.LearningRateScheduler(sfunc, init_steps)
@@ -195,6 +200,17 @@ class TransformerTask(object):
       tf.compat.v1.logging.info("Load weights: {}".format(init_weight_path))
       model.load_weights(init_weight_path, by_name=True)
 
+  def _create_distribution_strategy(self):
+    if self.params["no_dist_strat"]:
+      return misc.DummyStrategy()
+    if self.params["multi_worker_strat"]:
+      name = "multi_worker_mirrored"
+    else:
+      name = "mirrored"
+    strat = distribution_utils.get_distribution_strategy(
+        distribution_strategy=name, num_gpus=self.params["num_gpus"])
+    return strat
+
   def _create_optimizer(self):
     """Creates optimizer."""
     params = self.params
@@ -204,7 +220,6 @@ class TransformerTask(object):
         params["optimizer_adam_beta2"],
         epsilon=params["optimizer_adam_epsilon"])
     return opt
-
 
 def _get_log_dir_or_default(flags_obj):
   """Gets init_logdir_timestamp if it is given, otherwise use current time."""
@@ -239,3 +254,4 @@ if __name__ == "__main__":
   tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.INFO)
   misc.define_transformer_flags()
   tf.compat.v1.app.run(main)
+

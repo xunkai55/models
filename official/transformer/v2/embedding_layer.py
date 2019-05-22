@@ -101,3 +101,4 @@ class EmbeddingSharedWeights(tf.keras.layers.Layer):
       logits = tf.matmul(x, self.shared_weights, transpose_b=True)
 
       return tf.reshape(logits, [batch_size, length, self.vocab_size])
+
