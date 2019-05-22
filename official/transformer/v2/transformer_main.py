@@ -26,6 +26,10 @@ import datetime
 import os
 import tempfile
 
+# TODO(tianlin) Import internal library. Remove this when different behaviors
+# of keras_model.fit(dataset, ...) for different TF versions are fixed.
+from tensorflow.python import tf2 as tf2_internal
+
 # pylint: disable=g-bad-import-order
 from absl import flags
 import tensorflow as tf
@@ -122,7 +126,13 @@ class TransformerTask(object):
       cur_log_dir = _get_log_dir_or_default(flags_obj)
       _ensure_dir(cur_log_dir)
 
-      map_data_fn = lambda x, y: ((x, y), y)
+      if tf2_internal.enabled():
+        if params["no_dist_strat"]:
+          map_data_fn = data_pipeline.map_data_for_transformer_fn_tf2
+        else:
+          map_data_fn = data_pipeline.map_data_for_transformer_fn_tf_ds
+      else:
+        map_data_fn = data_pipeline.map_data_for_transformer_fn_tf1
       train_ds = data_pipeline.train_input_fn(params)
       train_ds = train_ds.map(
           map_data_fn, num_parallel_calls=params["num_parallel_calls"])

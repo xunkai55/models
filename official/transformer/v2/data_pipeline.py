@@ -56,10 +56,6 @@ import os
 
 import tensorflow as tf
 
-# TODO(tianlin) Import internal library. Remove this when different behaviors
-# of keras_model.fit(dataset, ...) for different TF versions are fixed.
-from tensorflow.python import tf2 as tf2_internal
-
 from official.utils.misc import model_helpers
 
 # Buffer size for reading records from a TFRecord file. Each training file is
@@ -289,12 +285,15 @@ def eval_input_fn(params):
       static_batch=params["static_batch"])
 
 
-def map_data_for_transformer_fn(x, y):
+def map_data_for_transformer_fn_tf2(x, y):
   """Maps data for training, and handles weried behaviors for different vers."""
-  # Will transform input x and targets y into tuple(x, y) as new model inputs.
-  if tf2_internal.enabled():
-    # For TF v2, the 2nd parameter is omitted to make Keras training work.
-    return ((x, y), y)
-  else:
-    # For TF v1, Keras requires a dummy placeholder as the 2nd parameter.
-    return ((x, y), tf.constant(0.0))
+  # For TF v2, the 2nd parameter is omitted to make Keras training work.
+  return ((x, y),)
+
+def map_data_for_transformer_fn_tf_ds(x, y):
+  # For Distribution Strategy, it requries Y with same 1st dimension with x.
+  return ((x, y), y)
+
+def map_data_for_transformer_fn_tf1(x, y):
+  # For TF v1, Keras requires a dummy placeholder as the 2nd parameter.
+  return ((x, y), tf.constant(0.0))
