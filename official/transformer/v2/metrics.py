@@ -26,6 +26,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from tensorflow.python.keras.distribute import distributed_training_utils
+
 import functools
 
 import tensorflow as tf
@@ -160,10 +162,9 @@ class MetricLayer(tf.keras.layers.Layer):
 
   def call(self, inputs):
     logits, targets = inputs[0], inputs[1]
-    if not tf.distribute.in_cross_replica_context():
-      for mean, fn in self.metric_mean_fns:
-        m = mean(*fn(logits, targets))
-        self.add_metric(m)
+    for mean, fn in self.metric_mean_fns:
+      self.add_metric(distributed_training_utils.call_replica_local_fn(
+          mean, *fn(logits, targets)))
     return logits
 
 

@@ -82,7 +82,7 @@ def sequence_beam_search(
     sequence scores [batch_size, beam_size]
   """
   batch_size = tf.shape(initial_ids)[0]
-  if misc.is_v2():
+  if True:
     sbs = SequenceBeamSearchV2(symbols_to_logits_fn, vocab_size, batch_size,
                                beam_size, alpha, max_decode_length, eos_id)
   else:

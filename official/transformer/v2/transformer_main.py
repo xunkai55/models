@@ -99,6 +99,7 @@ class TransformerTask(object):
 
     self.params = params = misc.get_model_params(flags_obj.param_set, num_gpus)
 
+    params["num_gpus"] = num_gpus
     params["data_dir"] = flags_obj.data_dir
     params["model_dir"] = flags_obj.model_dir
     params["static_batch"] = flags_obj.static_batch
@@ -126,7 +127,7 @@ class TransformerTask(object):
     model.summary()
 
     if self.distribution_strategy:
-      map_data_fn = lambda x,y: (x,y)
+      map_data_fn = lambda x, y: (x, y)
     else:
       map_data_fn = data_pipeline.map_data_for_transformer_fn
     train_ds = data_pipeline.train_input_fn(params)
@@ -147,8 +148,7 @@ class TransformerTask(object):
           initial_epoch=i-1,
           epochs=i,
           steps_per_epoch=flags_obj.steps_between_evals,
-          callbacks=callbacks,
-          verbose=2)
+          callbacks=callbacks)
       print("End train iteration:{}/{} global step:{}".format(
           i,
           iterations,
@@ -158,6 +158,8 @@ class TransformerTask(object):
 
       if (flags_obj.bleu_source and flags_obj.bleu_ref):
         uncased_score, cased_score = self.eval()
+
+      print("BLEU: uncased={}, cased={}".format(uncased_score, cased_score))
 
     stats = misc.build_stats(history, callbacks)
     if uncased_score and cased_score:
@@ -198,7 +200,7 @@ class TransformerTask(object):
 
   def _create_callbacks(self, cur_log_dir, init_steps, params):
     """Creates a list of callbacks."""
-    sfunc = optimizer.LearningRateFn(params["learning_rate"],
+    sfunc = optimizer.LearningRateFn(params["learning_rate"] * params["num_gpus"],
                                      params["hidden_size"],
                                      params["learning_rate_warmup_steps"])
     scheduler_callback = optimizer.LearningRateScheduler(sfunc, init_steps)

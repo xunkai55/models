@@ -83,6 +83,9 @@ def define_transformer_flags():
           'The Number of training steps to run between evaluations. This is '
           'used if --train_steps is defined.'))
   flags.DEFINE_boolean(
+      name='enable_time_history', default=True,
+      help='Whether to enable TimeHistory callback.')
+  flags.DEFINE_boolean(
       name='enable_tensorboard', default=False,
       help='Whether to enable Tensorboard callback.')
   flags.DEFINE_string(
@@ -195,8 +198,9 @@ def define_transformer_flags():
 def get_callbacks():
   """Returns common callbacks."""
   callbacks = []
-  time_callback = keras_utils.TimeHistory(FLAGS.batch_size, FLAGS.log_steps)
-  callbacks.append(time_callback)
+  if FLAGS.enable_time_history:
+    time_callback = keras_utils.TimeHistory(FLAGS.batch_size, FLAGS.log_steps)
+    callbacks.append(time_callback)
 
   if FLAGS.enable_tensorboard:
     tensorboard_callback = tf.keras.callbacks.TensorBoard(
