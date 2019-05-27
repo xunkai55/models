@@ -223,10 +223,12 @@ def _read_and_batch_from_files(
 
   # Read files and interleave results. When training, the order of the examples
   # will be non-deterministic.
+  options = tf.data.Options()
+  options.experimental_deterministic = False
   dataset = dataset.interleave(
       _load_records,
       cycle_length=num_parallel_calls,
-      num_parallel_calls=num_parallel_calls)
+      num_parallel_calls=tf.data.experimental.AUTOTUNE).with_options(options)
 
   # Parse each tf.Example into a dictionary
   # TODO: Look into prefetch_input_elements for performance optimization.
@@ -244,7 +246,7 @@ def _read_and_batch_from_files(
     # Group and batch such that each batch has examples of similar length.
     dataset = _batch_examples(dataset, batch_size, max_length)
 
-  dataset = dataset.repeat(repeat)
+  # dataset = dataset.repeat(repeat)
 
   # Prefetch the next element to improve speed of input pipeline.
   dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
@@ -289,7 +291,7 @@ def eval_input_fn(params):
 def map_data_for_transformer_fn(x, y):
   """Maps data for training, and handles weried behaviors for different vers."""
   # Will transform input x and targets y into tuple(x, y) as new model inputs.
-  if misc.is_v2():
+  if misc.is_v2() and tf.executing_eagerly():
     # For TF v2, the 2nd parameter is omitted to make Keras training work.
     return ((x, y),)
   else:

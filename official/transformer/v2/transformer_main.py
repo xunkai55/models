@@ -47,6 +47,9 @@ BLEU_DIR = "bleu"
 _SINGLE_SAMPLE = 1
 
 
+tf.compat.v1.disable_eager_execution()
+
+
 def translate_and_compute_bleu(model, subtokenizer, bleu_source, bleu_ref):
   """Translate file and report the cased and uncased bleu scores."""
   # Create temporary file to store translation.
@@ -200,7 +203,7 @@ class TransformerTask(object):
 
   def _create_callbacks(self, cur_log_dir, init_steps, params):
     """Creates a list of callbacks."""
-    sfunc = optimizer.LearningRateFn(params["learning_rate"] * params["num_gpus"],
+    sfunc = optimizer.LearningRateFn(params["learning_rate"],
                                      params["hidden_size"],
                                      params["learning_rate_warmup_steps"])
     scheduler_callback = optimizer.LearningRateScheduler(sfunc, init_steps)
