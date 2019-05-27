@@ -164,9 +164,11 @@ class MetricLayer(tf.keras.layers.Layer):
   def call(self, inputs):
     logits, targets = inputs[0], inputs[1]
     for reducer, fn in self.metric_fns:
-      self.add_metric(distributed_training_utils.call_replica_local_fn(
-          reducer, *fn(logits, targets)))
-
+      if not tf.distribute.in_cross_replica_context():
+        self.add_metric(reducer(*fn(logits, targets)))
+      else:
+        self.add_metric(distributed_training_utils.call_replica_local_fn(
+            reducer, *fn(logits, targets)))
     return logits
 
 

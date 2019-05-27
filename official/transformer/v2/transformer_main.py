@@ -47,9 +47,6 @@ BLEU_DIR = "bleu"
 _SINGLE_SAMPLE = 1
 
 
-tf.compat.v1.disable_eager_execution()
-
-
 def translate_and_compute_bleu(model, subtokenizer, bleu_source, bleu_ref):
   """Translate file and report the cased and uncased bleu scores."""
   # Create temporary file to store translation.

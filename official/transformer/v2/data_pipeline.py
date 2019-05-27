@@ -291,7 +291,7 @@ def eval_input_fn(params):
 def map_data_for_transformer_fn(x, y):
   """Maps data for training, and handles weried behaviors for different vers."""
   # Will transform input x and targets y into tuple(x, y) as new model inputs.
-  if misc.is_v2() and tf.executing_eagerly():
+  if misc.is_v2():
     # For TF v2, the 2nd parameter is omitted to make Keras training work.
     return ((x, y),)
   else:
