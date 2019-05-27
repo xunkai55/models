@@ -122,6 +122,11 @@ def define_transformer_flags():
           'minimized, and helps model training. In cases where the input shape '
           'must be static (e.g. running on TPU), this setting will be ignored '
           'and static batching will always be used.'))
+  flags.DEFINE_integer(
+      name='max_length', default=256,
+      help=flags_core.help_wrap(
+          'Max sentence length for Transformer. Usually needs a small one if '
+          'static_batch is enabled.'))
 
   # Flags for training with steps (may be used for debugging)
   flags.DEFINE_integer(
