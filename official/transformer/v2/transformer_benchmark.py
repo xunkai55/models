@@ -142,9 +142,58 @@ class TransformerBaseKerasAccuracy(TransformerBenchmark):
     FLAGS.batch_size = 4096
     FLAGS.train_steps = 200000
     FLAGS.steps_between_evals = 5000
+    FLAGS.static_batch = True
     FLAGS.model_dir = self._get_model_dir('benchmark_1_gpu')
     # These bleu scores are based on test runs after at this limited
     # number of steps and batch size after verifying SOTA at 8xV100s.
+    self._run_and_report_benchmark(total_batch_size=FLAGS.batch_size,
+                                   log_steps=FLAGS.log_steps,
+                                   bleu_min=25.3,
+                                   bleu_max=26)
+
+  def benchmark_8_gpu(self):
+    """Benchmark 8 gpu.
+
+      The paper uses 8 GPUs and a much larger effective batch size, this is will
+      not converge to the 27.3 BLEU (uncased) SOTA.
+    """
+    self._setup()
+    FLAGS.num_gpus = 8
+    FLAGS.data_dir = self.train_data_dir
+    FLAGS.vocab_file = self.vocab_file
+    # Sets values directly to avoid validation check.
+    FLAGS['bleu_source'].value = self.bleu_source
+    FLAGS['bleu_ref'].value = self.bleu_ref
+    FLAGS.param_set = 'base'
+    FLAGS.batch_size = 32768
+    FLAGS.train_steps = 200000
+    FLAGS.static_batch = True
+    FLAGS.steps_between_evals = 5000
+    FLAGS.model_dir = self._get_model_dir('benchmark_8_gpu')
+    self._run_and_report_benchmark(total_batch_size=FLAGS.batch_size,
+                                   log_steps=FLAGS.log_steps,
+                                   bleu_min=25.3,
+                                   bleu_max=26)
+
+  def benchmark_big_8_gpu(self):
+    """Benchmark 8 gpu.
+
+      The paper uses 8 GPUs and a much larger effective batch size, this is will
+      not converge to the 27.3 BLEU (uncased) SOTA.
+    """
+    self._setup()
+    FLAGS.num_gpus = 8
+    FLAGS.data_dir = self.train_data_dir
+    FLAGS.vocab_file = self.vocab_file
+    # Sets values directly to avoid validation check.
+    FLAGS['bleu_source'].value = self.bleu_source
+    FLAGS['bleu_ref'].value = self.bleu_ref
+    FLAGS.param_set = 'big'
+    FLAGS.batch_size = 24576
+    FLAGS.train_steps = 200000
+    FLAGS.static_batch = True
+    FLAGS.steps_between_evals = 5000
+    FLAGS.model_dir = self._get_model_dir('benchmark_big_8_gpu')
     self._run_and_report_benchmark(total_batch_size=FLAGS.batch_size,
                                    log_steps=FLAGS.log_steps,
                                    bleu_min=25.3,
@@ -179,6 +228,7 @@ class TransformerKerasBenchmark(TransformerBenchmark):
     FLAGS.num_gpus = 1
     FLAGS.batch_size = self.batch_per_gpu
     FLAGS.model_dir = self._get_model_dir('benchmark_1_gpu')
+    FLAGS.static_batch = True
     self._run_and_report_benchmark(total_batch_size=FLAGS.batch_size,
                                    log_steps=FLAGS.log_steps)
 

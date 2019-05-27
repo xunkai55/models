@@ -39,6 +39,7 @@ from official.transformer.v2 import transformer
 from official.transformer.v2 import translate
 from official.utils.flags import core as flags_core
 from official.utils.logs import logger
+from official.utils.misc import distribution_utils
 
 
 INF = int(1e9)
@@ -92,10 +93,17 @@ class TransformerTask(object):
 
     # Add flag-defined parameters to params object
     num_gpus = flags_core.get_num_gpus(flags_obj)
+    self.distribution_strategy = distribution_utils.get_distribution_strategy(
+        distribution_strategy=flags_obj.distribution_strategy,
+        num_gpus=flags_core.get_num_gpus(flags_obj))
+
     self.params = params = misc.get_model_params(flags_obj.param_set, num_gpus)
 
+    params["num_gpus"] = num_gpus
     params["data_dir"] = flags_obj.data_dir
     params["model_dir"] = flags_obj.model_dir
+    params["static_batch"] = flags_obj.static_batch
+    params["max_length"] = flags_obj.max_length
     params["num_parallel_calls"] = (
         flags_obj.num_parallel_calls or tf.data.experimental.AUTOTUNE)
 
@@ -107,13 +115,22 @@ class TransformerTask(object):
     """Trains the model."""
     params, flags_obj, is_train = self.params, self.flags_obj, True
     _ensure_dir(flags_obj.model_dir)
-    model = transformer.create_model(params, is_train)
-    opt = self._create_optimizer()
+    if self.distribution_strategy:
+      with self.distribution_strategy.scope():
+        model = transformer.create_model(params, is_train)
+        opt = self._create_optimizer()
+        model.compile(opt)
+    else:
+      model = transformer.create_model(params, is_train)
+      opt = self._create_optimizer()
+      model.compile(opt)
 
-    model.compile(opt, target_tensors=[])
     model.summary()
 
-    map_data_fn = data_pipeline.map_data_for_transformer_fn
+    if self.distribution_strategy:
+      map_data_fn = lambda x, y: (x, y)
+    else:
+      map_data_fn = data_pipeline.map_data_for_transformer_fn
     train_ds = data_pipeline.train_input_fn(params)
     train_ds = train_ds.map(
         map_data_fn, num_parallel_calls=params["num_parallel_calls"])
@@ -132,8 +149,7 @@ class TransformerTask(object):
           initial_epoch=i-1,
           epochs=i,
           steps_per_epoch=flags_obj.steps_between_evals,
-          callbacks=callbacks,
-          verbose=2)
+          callbacks=callbacks)
       print("End train iteration:{}/{} global step:{}".format(
           i,
           iterations,
@@ -143,6 +159,8 @@ class TransformerTask(object):
 
       if (flags_obj.bleu_source and flags_obj.bleu_ref):
         uncased_score, cased_score = self.eval()
+
+      print("BLEU: uncased={}, cased={}".format(uncased_score, cased_score))
 
     stats = misc.build_stats(history, callbacks)
     if uncased_score and cased_score:

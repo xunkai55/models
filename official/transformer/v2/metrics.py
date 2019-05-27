@@ -26,6 +26,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from tensorflow.python.keras.distribute import distributed_training_utils
+
 import functools
 
 import tensorflow as tf
@@ -146,12 +148,13 @@ class MetricLayer(tf.keras.layers.Layer):
     """"Builds metric layer."""
     neg_log_perplexity = functools.partial(
         padded_neg_log_perplexity, vocab_size=self.vocab_size)
-    self.metric_mean_fns = [
+    self.metric_fns = [
         (tf.keras.metrics.Mean("accuracy"), padded_accuracy),
         (tf.keras.metrics.Mean("accuracy_top5"), padded_accuracy_top5),
         (tf.keras.metrics.Mean("accuracy_per_sequence"),
          padded_sequence_accuracy),
         (tf.keras.metrics.Mean("neg_log_perplexity"), neg_log_perplexity),
+        (tf.keras.metrics.Sum("num_sentences"), lambda logits, labels: (tf.shape(logits)[0],))
     ]
     super(MetricLayer, self).build(input_shape)
 
@@ -160,9 +163,12 @@ class MetricLayer(tf.keras.layers.Layer):
 
   def call(self, inputs):
     logits, targets = inputs[0], inputs[1]
-    for mean, fn in self.metric_mean_fns:
-      m = mean(*fn(logits, targets))
-      self.add_metric(m)
+    for reducer, fn in self.metric_fns:
+      if not tf.distribute.in_cross_replica_context():
+        self.add_metric(reducer(*fn(logits, targets)))
+      else:
+        self.add_metric(distributed_training_utils.call_replica_local_fn(
+            reducer, *fn(logits, targets)))
     return logits
 
 

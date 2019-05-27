@@ -192,13 +192,14 @@ def _batch_examples(dataset, batch_size, max_length):
 
 
 def _read_and_batch_from_files(
-    file_pattern, batch_size, max_length, num_parallel_calls, shuffle, repeat,
-    static_batch=False):
+    file_pattern, batch_size, num_replica, max_length, num_parallel_calls,
+    shuffle, repeat, static_batch=False):
   """Create dataset where each item is a dict of "inputs" and "targets".
 
   Args:
     file_pattern: String used to match the input TFRecord files.
-    batch_size: Maximum number of tokens per batch of examples
+    batch_size: Per GPU maximum number of tokens per batch of examples
+    num_replica: Number of GPUs.
     max_length: Maximum number of tokens per example
     num_parallel_calls: Number of cpu cores for parallel input processing.
     shuffle: If true, randomizes order of elements.
@@ -223,10 +224,12 @@ def _read_and_batch_from_files(
 
   # Read files and interleave results. When training, the order of the examples
   # will be non-deterministic.
+  options = tf.data.Options()
+  options.experimental_deterministic = False
   dataset = dataset.interleave(
       _load_records,
       cycle_length=num_parallel_calls,
-      num_parallel_calls=num_parallel_calls)
+      num_parallel_calls=tf.data.experimental.AUTOTUNE).with_options(options)
 
   # Parse each tf.Example into a dictionary
   # TODO: Look into prefetch_input_elements for performance optimization.
@@ -238,11 +241,12 @@ def _read_and_batch_from_files(
 
   if static_batch:
     dataset = dataset.padded_batch(
-        batch_size // max_length, ([max_length], [max_length]),
+        batch_size // max_length * num_replica, ([max_length], [max_length]),
         drop_remainder=True)
   else:
     # Group and batch such that each batch has examples of similar length.
-    dataset = _batch_examples(dataset, batch_size, max_length)
+    # TODO: _batch_examples might need to do something special for num replica.
+    dataset = _batch_examples(dataset, batch_size * num_replica, max_length)
 
   dataset = dataset.repeat(repeat)
 
@@ -270,9 +274,10 @@ def train_input_fn(params):
   if params["use_synthetic_data"]:
     return _generate_synthetic_data(params)
   return _read_and_batch_from_files(
-      file_pattern, params["batch_size"], params["max_length"],
-      params["num_parallel_calls"], shuffle=True,
-      repeat=params["repeat_dataset"], static_batch=params["static_batch"])
+      file_pattern, params["batch_size"] // params["num_gpus"],
+      params["num_gpus"], params["max_length"], params["num_parallel_calls"],
+      shuffle=True, repeat=params["repeat_dataset"],
+      static_batch=params["static_batch"])
 
 
 def eval_input_fn(params):
@@ -281,9 +286,9 @@ def eval_input_fn(params):
   if params["use_synthetic_data"]:
     return _generate_synthetic_data(params)
   return _read_and_batch_from_files(
-      file_pattern, params["batch_size"], params["max_length"],
-      params["num_parallel_calls"], shuffle=False, repeat=1,
-      static_batch=params["static_batch"])
+      file_pattern, params["batch_size"] // params["num_gpus"],
+      params["num_gpus"], params["max_length"], params["num_parallel_calls"],
+      shuffle=False, repeat=1, static_batch=params["static_batch"])
 
 
 def map_data_for_transformer_fn(x, y):
